@@ -1,0 +1,164 @@
+is_odd <- function(x) x %% 2 > 0
+is_even <- function(x) !is_odd(x)
+
+ind_to_coord <- function(pz, ind) {
+    n <- dim(pz)[1]
+    c(1, 1) + c((ind - 1) %% n, (ind - 1) %/% n)
+}
+
+coord_to_ind <- function(pz, coord) {
+    n <- dim(pz)[1]
+    ((coord[2] - 1) * n) + coord[1]
+}
+
+goal_index <- function(pz, num) {
+    n <- dim(pz)[1]
+    c(1, 1) +
+        c((num - 1L) %/% n,
+          (num - 1L) %% n)
+}
+
+puzzle <- function(nums = sample(0:8), parent = NULL, moves = 0L) {
+    n <- length(nums)
+    rank <- sqrt(length(nums))
+    if (rank != as.integer(rank))
+        stop("Puzzle must be a square")
+    rank <- as.integer(rank)
+    if (identical(dim(nums), c(rank, rank)))
+        res <- nums
+    else res <- matrix(nums, nrow = rank, ncol = rank, byrow = TRUE)
+
+    actual <- vapply(
+        seq_len(n - 1),
+        function(x) which(res == x),
+        FUN.VALUE = integer(1))
+
+    actual <- ind_to_coord(res, actual)
+    actual <- matrix(actual, ncol = 2)
+
+    goal <- goal_index(res, seq_len(n - 1))
+    goal <- matrix(goal, ncol = 2)
+    manhattan <- sum(abs(actual - goal))
+    hamming <- sum((actual[,1] != goal[,1]) + (actual[,2] != goal[,2]) > 0)
+
+    dist <- (manhattan * (n-1)) + hamming
+
+
+    structure(res,
+              manhattan = manhattan,
+              hamming = hamming,
+              priority = function() {
+                  manhattan + moves
+              },
+              parent = function() parent,
+              moves = moves,
+              class = "puzzlr")
+}
+
+dist <- function(pz) attr(pz, "dist")
+manhattan <- function(pz) attr(pz, "manhattan")
+moves <- function(pz) attr(pz, "moves")
+parent <- function(sol) attr(sol, "parent")()
+priority <- function(pz) attr(pz, "priority")()
+
+blank <- function(pz) {
+    which(pz == 0)
+}
+
+move <- function(pz, source, dest) {
+    res <- pz
+    res[dest[1], dest[2]] <- res[source[1], source[2]]
+    res[source[1], source[2]] <- 0L
+    puzzle(res, parent = pz, moves(pz) + 1L)
+}
+
+equivalent <- function(p1, p2) {
+    if (is.null(p1) && is.null(p2)) stop("Comparing nothing")
+    if (is.null(p1)) return(FALSE)
+    if (is.null(p2)) return(FALSE)
+    all(p1 == p2)
+}
+
+neighbors <- function(pz) {
+    blank_tile <- ind_to_coord(pz, blank(pz))
+    row <- blank_tile[1]
+    col <- blank_tile[2]
+    dim <- nrow(pz)
+    nbrs <- vector("list", 4L)
+
+    if (row > 1) {
+        candidate <- move(pz, c(row - 1L, col), blank_tile)
+        if (!equivalent(candidate, parent(pz)))
+            nbrs[[1]] <- candidate
+    }
+
+    if (row < dim) {
+        candidate <- move(pz, c(row + 1L, col), blank_tile)
+        if (!equivalent(candidate, parent(pz)))
+            nbrs[[2]] <- candidate
+    }
+
+    if (col > 1) {
+        candidate <- move(pz, c(row, col - 1L), blank_tile)
+        if (!equivalent(candidate, parent(pz)))
+            nbrs[[3]] <- candidate
+    }
+
+    if (col < dim) {
+        candidate <- move(pz, c(row, col + 1L), blank_tile)
+        if (!equivalent(candidate, parent(pz)))
+            nbrs[[4]] <- candidate
+    }
+    purrr::compact(nbrs)
+}
+
+print.puzzlr <- function(x, ...) {
+    dim <- nrow(x)
+    blockwidth <- nchar(max(x))
+
+    stringx <- stringr::str_pad(x, blockwidth, pad = "0")
+    dim(stringx) <- c(dim, dim)
+
+    blank_tile <- paste(rep("@", blockwidth), collapse = "")
+
+    for (i in seq_len(dim)) {
+        for (j in seq_len(dim)) {
+            if (x[i,j] == 0) cat(blank_tile) else cat(stringx[i,j])
+            if (j < dim) cat(" . ")
+        }
+        cat("\n")
+    }
+    invisible(x)
+}
+
+is_solvable <- function(pz) {
+    ## check solvability:
+    tester <- c(t(pz))
+    tester <- tester[tester > 0]
+    l <- length(tester)
+    inversions <- 0
+    for (ind in seq_len(l - 1)) {
+        comp <- tester[seq(ind + 1L, l)]
+        comp <- comp[comp > 0]
+        inversions <- inversions + sum(tester[ind] > comp)
+    }
+    rank <- nrow(pz)
+
+    if (is_odd(rank)) {
+        solvable <- is_even(inversions)
+    } else {
+        blank_tile <- ind_to_coord(pz, blank(pz))
+        blank_row <- blank_tile[1]
+        blank_from_bottom <- rank - blank_row + 1
+        if (is_even(blank_from_bottom)) solvable <- is_odd(inversions)
+        else solvable <- is_even(inversions)
+    }
+    solvable
+}
+
+random_puzzle <- function(size) {
+    n <- size**2
+    pz <- puzzle(sample(seq(0, n - 1), replace = FALSE))
+    if (is_solvable(pz)) return(pz)
+    else return(random_puzzle(size))
+}
