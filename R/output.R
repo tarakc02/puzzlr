@@ -72,28 +72,40 @@ animate_moves <- function(solution, ...) {
     if (nrow(solution) > 4) tile_text_size <- 10
     if (nrow(solution) > 7) tile_text_size <- 8
 
-    allframes <- purrr::imap(
-        all_moves,
-        ~dplyr::mutate(
-            .x,
-            frame = paste0("After ",
-                           stringr::str_pad(
-                               .y - 1,
-                               width = movewidth,
-                               side = "left",
-                               pad = "0"),
-                           " moves"))) %>%
-        dplyr::bind_rows()
+    label_text_size <- 8
 
-    toplot <- allframes %>%
-        dplyr::mutate(value = ifelse(value == 0, "", value)) %>%
-        ggplot2::ggplot(ggplot2::aes(x = col, y = -row, frame = frame)) +
-        ggplot2::geom_tile(ggplot2::aes(fill = iszero), colour = lightcolor) +
+    allframes <- purrr::imap(all_moves, ~dplyr::mutate(.x, frame = .y)) %>%
+        dplyr::bind_rows() %>%
+        dplyr::mutate(col = c(a = 1, b = 2, c = 3)[col],
+                      ease = 'elastic-in-out') %>%
+        tweenr::tween_elements(time = "frame", group = "value", ease = "ease",
+                               nframes = 50)
+
+    g <- allframes %>%
+        dplyr::mutate(
+            value = as.character(.group),
+            value = ifelse(value == 0, "", value)) %>%
+        dplyr::mutate(xmin = col - .5, xmax = col + .5,
+                      ymin = -row - .5, ymax = -row + .5) %>%
+        ggplot2::ggplot(ggplot2::aes(frame = .frame)) +
+        ggplot2::geom_rect(ggplot2::aes(xmin = xmin, xmax = xmax,
+                                        ymin = ymin, ymax = ymax,
+                                        fill = iszero),
+                           colour = lightcolor) +
         ggplot2::scale_fill_manual(
             values = c(`TRUE` = lightcolor, `FALSE` = darkcolor),
             guide = "none") +
-        ggplot2::scale_x_discrete(expand = c(0,0)) +
-        ggplot2::geom_text(ggplot2::aes(label = value), size = tile_text_size,
+        ggplot2::scale_x_continuous(expand = c(0, 0)) +
+        ggplot2::scale_y_continuous(expand = c(0, 0)) +
+        ggplot2::geom_text(ggplot2::aes(
+            label = paste0("Moves: ", stringr::str_pad(
+                round(frame) - 1,
+                width = movewidth,
+                pad = " ")),
+            x = 1, y = -.65), colour = "white", size = 8) +
+        ggplot2::geom_text(ggplot2::aes(x = col, y = -row,
+                                        label = value),
+                           size = tile_text_size,
                            colour = lightcolor) +
         ggplot2::coord_equal() +
         ggplot2::theme(line = ggplot2::element_blank(),
@@ -104,7 +116,8 @@ animate_moves <- function(solution, ...) {
                            hjust = 0,
                            size = 25,
                            margin = ggplot2::margin()),
-                       plot.margin = ggplot2::margin(30, 30, 30, 30))
-
-    gganimate::gganimate(toplot, ...)
+                       plot.margin = ggplot2::margin(30, 30, 30, 30),
+                       panel.background = ggplot2::element_rect(fill = lightcolor))
+    animation::ani.options(interval = 1/5)
+    gganimate::gganimate(g, ..., title_frame = FALSE)
 }
