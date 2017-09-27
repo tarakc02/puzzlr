@@ -13,7 +13,7 @@ print.puzzlr <- function(x, ...) {
     stringx <- stringr::str_pad(x, blockwidth, pad = "0")
     dim(stringx) <- c(dim, dim)
 
-    blank_tile <- paste(rep("@", blockwidth), collapse = "")
+    blank_tile <- paste(rep(" ", blockwidth), collapse = "")
 
     for (i in seq_len(dim)) {
         for (j in seq_len(dim)) {
