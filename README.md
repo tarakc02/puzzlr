@@ -40,10 +40,10 @@ Or generate a random puzzle:
 
 ``` r
 random_puzzle(size = 4)
-#> 01 . 05 . 15 . 08
-#> @@ . 10 . 07 . 14
-#> 02 . 12 . 04 . 13
-#> 03 . 06 . 09 . 11
+#> 01 . 12 . 11 . 15
+#> 10 . 07 . 09 . 03
+#> 13 . 05 . @@ . 08
+#> 04 . 06 . 14 . 02
 ```
 
 Puzzle Methods
@@ -188,6 +188,4 @@ You can animate the results:
 animate_moves(mysolution)
 ```
 
-<video controls loop>
-<source src="README/README-figanimate.webm" />
-</video>
+![](README/README-fig-animated-solution.gif)

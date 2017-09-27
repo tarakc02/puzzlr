@@ -9,7 +9,10 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
   fig.path = "README/README-fig",
-  cache.path = "README/README-cache-"
+  cache.path = "README/README-cache-",
+  warning = FALSE,
+  message = FALSE,
+  cache = FALSE
 )
 ```
 
@@ -141,6 +144,14 @@ moves(mysolution)
 
 You can animate the results:
 
-```{r animate, cache = TRUE, fig.show="animate"}
+```{r animate, echo = FALSE}
+if (!file.exists("README/README-fig-animated-solution.gif"))
+    animate_moves(mysolution,  
+                  filename = "README/README-fig-animated-solution.gif")
+```
+
+```{r, eval = FALSE}
 animate_moves(mysolution)
 ```
+
+![](README/README-fig-animated-solution.gif)

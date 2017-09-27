@@ -63,7 +63,7 @@ plot.puzzlr <- function(pz) {
 }
 
 #' @export
-animate_moves <- function(solution, file = NULL) {
+animate_moves <- function(solution, ...) {
     all_moves <- purrr::map(replay_moves(solution), as.data.frame)
     movewidth <- nchar(moves(solution))
 
@@ -106,6 +106,5 @@ animate_moves <- function(solution, file = NULL) {
                            margin = ggplot2::margin()),
                        plot.margin = ggplot2::margin(30, 30, 30, 30))
 
-    res <- gganimate::gganimate(toplot, filename = file, saver = "gif")
-    res
+    gganimate::gganimate(toplot, ...)
 }
