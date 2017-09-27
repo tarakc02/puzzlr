@@ -1,23 +1,4 @@
-is_odd <- function(x) x %% 2 > 0
-is_even <- function(x) !is_odd(x)
-
-ind_to_coord <- function(pz, ind) {
-    n <- dim(pz)[1]
-    c(1, 1) + c((ind - 1) %% n, (ind - 1) %/% n)
-}
-
-coord_to_ind <- function(pz, coord) {
-    n <- dim(pz)[1]
-    ((coord[2] - 1) * n) + coord[1]
-}
-
-goal_index <- function(pz, num) {
-    n <- dim(pz)[1]
-    c(1, 1) +
-        c((num - 1L) %/% n,
-          (num - 1L) %% n)
-}
-
+#' @export
 puzzle <- function(nums = sample(0:8), parent = NULL, moves = 0L) {
     n <- length(nums)
     rank <- sqrt(length(nums))
@@ -41,31 +22,53 @@ puzzle <- function(nums = sample(0:8), parent = NULL, moves = 0L) {
     manhattan <- sum(abs(actual - goal))
     hamming <- sum((actual[,1] != goal[,1]) + (actual[,2] != goal[,2]) > 0)
 
-    dist <- (manhattan * (n-1)) + hamming
-
-
     structure(res,
               manhattan = manhattan,
               hamming = hamming,
-              priority = function() {
-                  manhattan + moves
-              },
               parent = function() parent,
               moves = moves,
               class = "puzzlr")
 }
 
-dist <- function(pz) attr(pz, "dist")
-manhattan <- function(pz) attr(pz, "manhattan")
-moves <- function(pz) attr(pz, "moves")
-parent <- function(sol) attr(sol, "parent")()
-priority <- function(pz) attr(pz, "priority")()
+#' @export
+manhattan <- function(pz) UseMethod("manhattan")
+
+#' @export
+hamming <- function(pz) UseMethod("hamming")
+
+#' @export
+moves <- function(pz) UseMethod("moves")
+
+#' @export
+parent <- function(pz) UseMethod("parent")
+
+#' @export
+move <- function(pz, source, dest) UseMethod("move")
+
+#' @export
+neighbors <- function(pz) UseMethod("neighbors")
+
+#' @export
+is_solvable <- function(pz) UseMethod("is_solvable")
+
+#' @export
+manhattan.puzzlr <- function(pz) attr(pz, "manhattan")
+
+#' @export
+hamming.puzzlr <- function(pz) attr(pz, "hamming")
+
+#' @export
+moves.puzzlr <- function(pz) attr(pz, "moves")
+
+#' @export
+parent.puzzlr <- function(pz) attr(pz, "parent")()
 
 blank <- function(pz) {
     which(pz == 0)
 }
 
-move <- function(pz, source, dest) {
+#' @export
+move.puzzlr <- function(pz, source, dest) {
     res <- pz
     res[dest[1], dest[2]] <- res[source[1], source[2]]
     res[source[1], source[2]] <- 0L
@@ -79,7 +82,8 @@ equivalent <- function(p1, p2) {
     all(p1 == p2)
 }
 
-neighbors <- function(pz) {
+#' @export
+neighbors.puzzlr <- function(pz) {
     blank_tile <- ind_to_coord(pz, blank(pz))
     row <- blank_tile[1]
     col <- blank_tile[2]
@@ -112,26 +116,8 @@ neighbors <- function(pz) {
     purrr::compact(nbrs)
 }
 
-print.puzzlr <- function(x, ...) {
-    dim <- nrow(x)
-    blockwidth <- nchar(max(x))
-
-    stringx <- stringr::str_pad(x, blockwidth, pad = "0")
-    dim(stringx) <- c(dim, dim)
-
-    blank_tile <- paste(rep("@", blockwidth), collapse = "")
-
-    for (i in seq_len(dim)) {
-        for (j in seq_len(dim)) {
-            if (x[i,j] == 0) cat(blank_tile) else cat(stringx[i,j])
-            if (j < dim) cat(" . ")
-        }
-        cat("\n")
-    }
-    invisible(x)
-}
-
-is_solvable <- function(pz) {
+#' @export
+is_solvable.puzzlr <- function(pz) {
     ## check solvability:
     tester <- c(t(pz))
     tester <- tester[tester > 0]
@@ -156,6 +142,8 @@ is_solvable <- function(pz) {
     solvable
 }
 
+
+#' @export
 random_puzzle <- function(size) {
     n <- size**2
     pz <- puzzle(sample(seq(0, n - 1), replace = FALSE))

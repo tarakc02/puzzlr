@@ -1,7 +1,7 @@
 Package: puzzlr
 Type: Package
 Title: Tools for Puzzle Solvers
-Version: 0.0.0.9001
+Version: 0.0.0.9002
 Author: Tarak Shah
 Maintainer: Tarak Shah <tarak_shah@berkeley.edu>
 Description: Use to experiment with puzzle solvers
@@ -9,4 +9,10 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Imports: purrr,
-    stringr
+    stringr,
+    ggplot2,
+    magrittr,
+    dplyr,
+    tibble,
+    gganimate
+RoxygenNote: 6.0.1
