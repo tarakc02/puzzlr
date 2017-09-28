@@ -1,6 +1,7 @@
 #' @export
 puzzle <- function(nums = sample(0:8), parent = NULL, moves = 0L) {
     n <- length(nums)
+    force(parent)
     rank <- sqrt(length(nums))
     if (rank != as.integer(rank))
         stop("Puzzle must be a square")
