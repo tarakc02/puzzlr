@@ -66,6 +66,7 @@ plot.puzzlr <- function(pz) {
 animate_moves <- function(solution, ...) {
     all_moves <- purrr::map(replay_moves(solution), as.data.frame)
     movewidth <- nchar(moves(solution))
+    nframes <- moves(solution) * 2
 
     tile_text_size <- 20
     if (nrow(solution) > 3) tile_text_size <- 15
@@ -79,7 +80,7 @@ animate_moves <- function(solution, ...) {
         dplyr::mutate(col = c(a = 1, b = 2, c = 3)[col],
                       ease = 'elastic-in-out') %>%
         tweenr::tween_elements(time = "frame", group = "value", ease = "ease",
-                               nframes = 50)
+                               nframes = nframes)
 
     g <- allframes %>%
         dplyr::mutate(
