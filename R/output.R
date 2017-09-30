@@ -63,10 +63,10 @@ plot.puzzlr <- function(pz) {
 }
 
 #' @export
-animate_moves <- function(solution, ...) {
+animate_moves <- function(solution, ..., interval = 1/4, nf = 3) {
     all_moves <- purrr::map(replay_moves(solution), as.data.frame)
     movewidth <- nchar(moves(solution))
-    nframes <- moves(solution) * 2
+    nframes <- moves(solution) * nf
 
     tile_text_size <- 20
     if (nrow(solution) > 3) tile_text_size <- 15
@@ -119,6 +119,6 @@ animate_moves <- function(solution, ...) {
                            margin = ggplot2::margin()),
                        plot.margin = ggplot2::margin(30, 30, 30, 30),
                        panel.background = ggplot2::element_rect(fill = lightcolor))
-    animation::ani.options(interval = 1/5)
+    animation::ani.options(interval = interval)
     gganimate::gganimate(g, ..., title_frame = FALSE)
 }
