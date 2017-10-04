@@ -2,8 +2,11 @@
 #' @export
 magrittr::`%>%`
 
-darkcolor <- "#2d425f"
-lightcolor <- "#f3a950"
+# darkcolor <- "#2d425f"
+# lightcolor <- "#f3a950"
+
+lightcolor <- "#a9ddb3"
+darkcolor <- "#4f1f6f"
 
 #' @export
 print.puzzlr <- function(x, ...) {
