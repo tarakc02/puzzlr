@@ -1,0 +1,198 @@
+---
+title: "Solving the knapsack with branch-and-bound"
+author: "Tarak Shah"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Solving the knapsack with branch-and-bound}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
+---
+
+## The Knapsack problem
+
+...
+
+## Branch and bound
+
+```{r}
+library(lazylist)
+
+f <- function(ks, search_stragey = best_first, best_so_far = 0) {
+    branches <- sub_problems(ks)
+    if (length(branches) == 0) return(empty_stream())
+    
+    expand_and_bound <- function(problem) {
+        if (node$upper_bound < best_so_far) return(empty_stream())
+        new_best <- pmax(node$lower_bound, best_so_far)
+        cons_stream(node,
+                    solution_stream(node,
+                                    search_strategy = search_strategy,
+                                    best = new_best))
+    }
+    
+}
+
+solution_stream <- function(root, 
+                            search_strategy = best_first, 
+                            best_so_far = 0) {
+    branches <- branch(root)
+    if (length(branches) == 0) return(empty_stream())
+    
+    expand_and_bound <- function(node) {
+        if (node$upper_bound < best_so_far) return(empty_stream())
+        new_best <- pmax(node$lower_bound, best_so_far)
+        cons_stream(node,
+                    solution_stream(node,
+                                    search_strategy = search_strategy,
+                                    best = new_best))
+    }
+    branches <- purrr::map(branches, expand_and_bound)
+    purrr::reduce(branches, search_strategy)
+}
+```
+
+```{r}
+best_first <- function(x, y) 
+    merge_weighted(x, y, weight = function(x) -x$upper_bound)
+```
+
+```{r}
+make_node <- function(sub_problem, sub_solution, bounding_fn) {
+    bounds <- bounding_fn(sub_problem)
+    solution <- sub_solution$taken_items
+    rest_of_solution <- bounds$solution
+    while (!rest_of_solution("empty")) {
+        solution <- push(solution, 
+                         rest_of_solution("top"))
+        rest_of_solution <- rest_of_solution("without_top")
+    }
+    
+    list(sub_problem = sub_problem,
+         sub_solution = sub_solution,
+         bounding_fn = bounding_fn,
+         upper_bound = sub_solution$value + bounds$upper,
+         lower_bound = sub_solution$value + bounds$lower
+    )
+}
+```
+
+Bounding functions:
+
+```{r}
+greedy <- function(ks) {
+    solution <- ks
+    item <- next_item(solution)
+    while (!is.null(item) && item$weight <= capacity(solution)) {
+        solution <- next_knapsack(solution, take = TRUE)
+        item <- next_item(solution)
+    }
+    
+    upper_bound <- solution$value
+    if (capacity(solution) > 0 && !is.null(item)) {
+        partial_amount <- capacity(solution) / item$weight
+        upper_bound <- upper_bound + (partial_amount * item$value)
+    }
+    
+    list(solution = solution, upper_bound = upper_bound)
+}
+
+```
+```{r}
+branch <- function(node) {
+    remaining_items <- node$sub_problem$items
+    if (remaining_items("empty")) return(list())
+    
+    next_item <- remaining_items("top")
+    weight <- next_item$weight
+    value <- next_item$value
+    
+    remaining_items <- remaining_items("without_top")
+    taken_items <- node$sub_solution$taken_items
+    
+    take <- NULL
+    if (node$sub_problem$capacity >= weight)
+        take <- make_node(
+            sub_problem = next_decision(node$sub_problem, take = TRUE), 
+            sub_solution = list(value = node$sub_solution$value + value, 
+                                taken_items = push(taken_items, next_item)),
+            bounding_fn = node$bounding_fn
+        )
+    notake <- make_node(
+        sub_problem = next_decision(node$sub_problem, take = FALSE),
+        sub_solution = list(value = node$sub_solution$value,
+                            taken_items = taken_items),
+        bounding_fn = node$bounding_fn)
+    
+    purrr::compact(list(take, notake))
+}
+```
+
+
+```{r}
+#ks <- uncorrelated_instance(25)
+ks <- strongly_correlated_instance(250)
+
+root <- make_node(ks_to_stack(ks), 
+                  sub_solution = list(taken_items = stack(), 
+                                      value = 0L),
+                  bounding_fn = greedy_bounds)
+bloop <- solution_stream(root = root, search_strategy = best_first, best = 0)
+system.time(ind <- stream_which(bloop, function(x) x$sub_problem$items("empty")))
+bloop[ind[1]]$sub_solution$value
+```
+
+
+## Tight bounds
+
+```{r}
+dp <- function(ks) {
+    capacity <- capacity(ks)
+    items <- item_df(ks)
+    n <- nrow(items)
+    weight <- items$weight
+    value <- items$value
+    id <- items$id
+
+    cache <- matrix(nrow = capacity, ncol = n, data = NA_integer_)
+
+    partial_solution <- function(cap, item) {
+        if (item == 0 || cap == 0) return(0L)
+        if (!is.na(cache[cap, item])) return(cache[cap, item])
+
+        if (weight[item] <= cap) {
+            resa <- partial_solution(cap, item - 1)
+            resb <- value[item] + partial_solution(cap - weight[item], item - 1)
+            res <- pmax(resa, resb)
+        } else {
+            res <- partial_solution(cap, item - 1)
+        }
+
+        cache[cap, item] <<- res
+        res
+    }
+
+    obj <- partial_solution(capacity, n)
+
+    # trace back
+    soln <- stack()
+    remaining_capacity <- capacity
+
+    i <- n
+    while(i > 1) {
+        if (cache[remaining_capacity, i] == cache[remaining_capacity, i - 1]) {
+            i <- i - 1
+        } else {
+            soln <- push(soln, id[i])
+            remaining_capacity <- remaining_capacity - weight[i]
+            i <- i - 1
+        }
+    }
+    if (cache[remaining_capacity, i] > 0) soln <- push(soln, id[i])
+
+    structure(soln, lower_bound = obj, upper_bound = obj)
+}
+
+```
