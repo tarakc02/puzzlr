@@ -17,7 +17,7 @@ push <- function(s, new_item) {
 }
 
 stackify <- function(items, density_order) {
-    if (density_order) items <- arrange(items, value / weight)
+    if (density_order) items <- dplyr::arrange(items, value / weight)
     res <- stack()
     for (i in seq(from = 1, to = nrow(items)))
         res <- push(res, as.list(items[i, , drop = FALSE]))
@@ -56,7 +56,7 @@ sub_problems <- function(ks) {
 }
 
 item_df <- function(ks) {
-    is <- items(ks)
+    is <- ks$items
     id <- vector("integer", is("size"))
     weight <- vector("integer", is("size"))
     value <- vector("integer", is("size"))
@@ -71,5 +71,8 @@ item_df <- function(ks) {
         row <- row + 1L
     }
 
-    data.frame(id = id, weight = weight, value = value)
+    structure(
+        data.frame(id = id, weight = weight, value = value),
+        class = c("tbl_df", "tbl", "data.frame")
+    )
 }

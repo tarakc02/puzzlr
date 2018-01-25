@@ -148,9 +148,51 @@ bloop[ind[1]]$sub_solution$value
 ## Tight bounds
 
 ```{r}
+dp2 <- function(ks) {
+    items <- items(ks)
+    num_items <- nrow(items)
+    weight <- items$weight
+    value <- items$value
+    id <- items$id
+    
+    max_value <- max(value)
+    A <- matrix(nrow = num_items, ncol = max_value * num_items, data = Inf)
+    A[1, value[1]] <- weight[1]
+    
+    for (i in seq_len(num_items - 1)) {
+        for (p in seq_len(max_value * num_items)) {
+            if (value[i + 1] < p) {
+                A[i + 1, p] <- pmin(A[i, p],
+                                    weight[i + 1] + A[i, p - value[i + 1]])
+            } else {
+                A[i + 1, p] <- A[i, p]
+            }
+        }
+    }
+    A[A > capacity(ks)] <- 0
+    
+    k <- max_value * num_items
+    while(sum(A[, k]) <= 0) k <- k - 1
+    permak <- k
+    
+    res <- integer(0)
+    item <- num_items
+    minwt <- A[item, k]
+    for (item in num_items:1) {
+        thiswt <- A[item, k]
+        if (thiswt != minwt) {
+            res <- c(res, id[item+ 1 ])
+            k <- k - value[item + 1]
+            minwt <- A[item, k]
+        }
+    }
+    if (A[1, k] > 0) res <- c(res, id[1])
+    list(k = permak, solution = res)
+}
+
 dp <- function(ks) {
     capacity <- capacity(ks)
-    items <- item_df(ks)
+    items <- items(ks)
     n <- nrow(items)
     weight <- items$weight
     value <- items$value

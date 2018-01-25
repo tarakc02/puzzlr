@@ -16,13 +16,13 @@ capacity <- function(ks) UseMethod("capacity")
 capacity.knapsack <- function(ks) ks$capacity
 
 items <- function(ks) UseMethod("items")
-items.knapsack <- function(ks) ks$items
+items.knapsack <- function(ks) item_df(ks)
 
 next_item <- function(ks) UseMethod("next_item")
 next_item.knapsack <- function(ks) ks$items("top")
 
 print.knapsack <- function(x, ...) {
-    its <- items(x)
+    its <- x$items
     printlen <- pmin(6L, its("size"))
 
     cat("knapsack\n")
