@@ -21,6 +21,15 @@ items.knapsack <- function(ks) item_df(ks)
 next_item <- function(ks) UseMethod("next_item")
 next_item.knapsack <- function(ks) ks$items("top")
 
+n_items <- function(ks) UseMethod("n_items")
+n_items.knapsack <- function(ks) ks$items("size")
+
+take_items <- function(ks, ids) {
+    while(ks$items("size") > 0)
+        ks <- if (next_item(ks)$id %in% ids) take(ks) else dont_take(ks)
+    ks
+}
+
 print.knapsack <- function(x, ...) {
     its <- x$items
     printlen <- pmin(6L, its("size"))

@@ -20,63 +20,38 @@ editor_options:
 ```{r}
 library(lazylist)
 
-f <- function(ks, search_stragey = best_first, best_so_far = 0) {
-    branches <- sub_problems(ks)
-    if (length(branches) == 0) return(empty_stream())
-    
-    expand_and_bound <- function(problem) {
-        if (node$upper_bound < best_so_far) return(empty_stream())
-        new_best <- pmax(node$lower_bound, best_so_far)
-        cons_stream(node,
-                    solution_stream(node,
-                                    search_strategy = search_strategy,
-                                    best = new_best))
-    }
-    
+bound <- function(ks, bounding_fn) {
+    bounds <- bounding_fn(ks)
+    list(problem = ks, 
+         upper_bound = bounds$upper_bound, 
+         lower_bound = bounds$solution$value)
 }
 
-solution_stream <- function(root, 
+solution_stream <- function(root, bounding_fn,
                             search_strategy = best_first, 
-                            best_so_far = 0) {
-    branches <- branch(root)
+                            best_so_far = NULL) {
+    if (is.null(best_so_far)) best_so_far <- root$lower_bound
+    branches <- sub_problems(root$problem)
     if (length(branches) == 0) return(empty_stream())
     
-    expand_and_bound <- function(node) {
-        if (node$upper_bound < best_so_far) return(empty_stream())
-        new_best <- pmax(node$lower_bound, best_so_far)
-        cons_stream(node,
-                    solution_stream(node,
+    expand_and_bound <- function(sub_problem, bounding_fn = bounding_fn) {
+        search_node <- bound(sub_problem, bounding_fn = bounding_fn)
+        if (search_node$upper_bound < best_so_far) return(empty_stream())
+        new_best <- max(search_node$lower_bound, best_so_far)
+        cons_stream(search_node,
+                    solution_stream(search_node, bounding_fn = bounding_fn,
                                     search_strategy = search_strategy,
                                     best = new_best))
     }
-    branches <- purrr::map(branches, expand_and_bound)
+    branches <- purrr::map(branches, expand_and_bound, bounding_fn = bounding_fn)
     purrr::reduce(branches, search_strategy)
 }
 ```
 
+
 ```{r}
 best_first <- function(x, y) 
     merge_weighted(x, y, weight = function(x) -x$upper_bound)
-```
-
-```{r}
-make_node <- function(sub_problem, sub_solution, bounding_fn) {
-    bounds <- bounding_fn(sub_problem)
-    solution <- sub_solution$taken_items
-    rest_of_solution <- bounds$solution
-    while (!rest_of_solution("empty")) {
-        solution <- push(solution, 
-                         rest_of_solution("top"))
-        rest_of_solution <- rest_of_solution("without_top")
-    }
-    
-    list(sub_problem = sub_problem,
-         sub_solution = sub_solution,
-         bounding_fn = bounding_fn,
-         upper_bound = sub_solution$value + bounds$upper,
-         lower_bound = sub_solution$value + bounds$lower
-    )
-}
 ```
 
 Bounding functions:
@@ -86,12 +61,12 @@ greedy <- function(ks) {
     solution <- ks
     item <- next_item(solution)
     while (!is.null(item) && item$weight <= capacity(solution)) {
-        solution <- next_knapsack(solution, take = TRUE)
+        solution <- take(solution)
         item <- next_item(solution)
     }
     
     upper_bound <- solution$value
-    if (capacity(solution) > 0 && !is.null(item)) {
+    if (capacity(solution) > 0 && n_items(solution) > 1) {
         partial_amount <- capacity(solution) / item$weight
         upper_bound <- upper_bound + (partial_amount * item$value)
     }
@@ -100,48 +75,17 @@ greedy <- function(ks) {
 }
 
 ```
-```{r}
-branch <- function(node) {
-    remaining_items <- node$sub_problem$items
-    if (remaining_items("empty")) return(list())
-    
-    next_item <- remaining_items("top")
-    weight <- next_item$weight
-    value <- next_item$value
-    
-    remaining_items <- remaining_items("without_top")
-    taken_items <- node$sub_solution$taken_items
-    
-    take <- NULL
-    if (node$sub_problem$capacity >= weight)
-        take <- make_node(
-            sub_problem = next_decision(node$sub_problem, take = TRUE), 
-            sub_solution = list(value = node$sub_solution$value + value, 
-                                taken_items = push(taken_items, next_item)),
-            bounding_fn = node$bounding_fn
-        )
-    notake <- make_node(
-        sub_problem = next_decision(node$sub_problem, take = FALSE),
-        sub_solution = list(value = node$sub_solution$value,
-                            taken_items = taken_items),
-        bounding_fn = node$bounding_fn)
-    
-    purrr::compact(list(take, notake))
-}
-```
-
 
 ```{r}
 #ks <- uncorrelated_instance(25)
-ks <- strongly_correlated_instance(250)
-
-root <- make_node(ks_to_stack(ks), 
-                  sub_solution = list(taken_items = stack(), 
-                                      value = 0L),
-                  bounding_fn = greedy_bounds)
-bloop <- solution_stream(root = root, search_strategy = best_first, best = 0)
-system.time(ind <- stream_which(bloop, function(x) x$sub_problem$items("empty")))
-bloop[ind[1]]$sub_solution$value
+dplate <- function(ks) if (n_items(ks) <= 35) return(dp(ks)) else return(greedy(ks))
+ks <- weakly_correlated_instance(250)
+bloop1 <- solution_stream(bound(ks, bounding_fn = dplate), bounding_fn = dplate)
+bloop2 <- solution_stream(bound(ks, bounding_fn = greedy), bounding_fn = greedy)
+system.time(ind1 <- stream_which(bloop1, function(x) n_items(x$problem) == 0))
+system.time(ind2 <- stream_which(bloop2, function(x) n_items(x$problem) == 0))
+bloop1[ind1[1]]$problem
+bloop2[ind2[1]]$problem
 ```
 
 
@@ -155,12 +99,12 @@ dp2 <- function(ks) {
     value <- items$value
     id <- items$id
     
-    max_value <- max(value)
-    A <- matrix(nrow = num_items, ncol = max_value * num_items, data = Inf)
+    max_value <- sum(value)
+    A <- matrix(nrow = num_items, ncol = max_value, data = Inf)
     A[1, value[1]] <- weight[1]
     
     for (i in seq_len(num_items - 1)) {
-        for (p in seq_len(max_value * num_items)) {
+        for (p in seq_len(max_value)) {
             if (value[i + 1] < p) {
                 A[i + 1, p] <- pmin(A[i, p],
                                     weight[i + 1] + A[i, p - value[i + 1]])
@@ -171,26 +115,28 @@ dp2 <- function(ks) {
     }
     A[A > capacity(ks)] <- 0
     
-    k <- max_value * num_items
+    k <- max_value
     while(sum(A[, k]) <= 0) k <- k - 1
     permak <- k
     
-    res <- integer(0)
+    res <- stack()
     item <- num_items
     minwt <- A[item, k]
     for (item in num_items:1) {
         thiswt <- A[item, k]
         if (thiswt != minwt) {
-            res <- c(res, id[item+ 1 ])
+            res <- push(res, id[item + 1])
             k <- k - value[item + 1]
             minwt <- A[item, k]
         }
     }
-    if (A[1, k] > 0) res <- c(res, id[1])
+    if (A[1, k] > 0) res <- push(res, id[1])
     list(k = permak, solution = res)
 }
 
 dp <- function(ks) {
+    if (n_items(ks) == 0 || capacity(ks) == 0) 
+        return(list(solution = ks, upper_bound = ks$value))
     capacity <- capacity(ks)
     items <- items(ks)
     n <- nrow(items)
@@ -219,7 +165,7 @@ dp <- function(ks) {
     obj <- partial_solution(capacity, n)
 
     # trace back
-    soln <- stack()
+    soln <- vector("logical", n)
     remaining_capacity <- capacity
 
     i <- n
@@ -227,14 +173,14 @@ dp <- function(ks) {
         if (cache[remaining_capacity, i] == cache[remaining_capacity, i - 1]) {
             i <- i - 1
         } else {
-            soln <- push(soln, id[i])
+            soln[i] <- TRUE
             remaining_capacity <- remaining_capacity - weight[i]
             i <- i - 1
         }
     }
-    if (cache[remaining_capacity, i] > 0) soln <- push(soln, id[i])
-
-    structure(soln, lower_bound = obj, upper_bound = obj)
+    if (cache[remaining_capacity, 1] > 0) soln[1] <- TRUE
+    solution = take_items(ks, id[which(soln)])
+    list(solution = solution, upper_bound = solution$value)
 }
 
 ```

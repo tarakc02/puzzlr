@@ -42,6 +42,9 @@ next_knapsack <- function(kss, take) {
               class = "knapsack")
 }
 
+take <- function(ks) next_knapsack(ks, take = TRUE)
+dont_take <- function(ks) next_knapsack(ks, take = FALSE)
+
 sub_problems <- function(ks) {
     remaining_items <- ks$items
     if (remaining_items("size") <= 0L) return(list())
