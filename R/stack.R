@@ -30,7 +30,7 @@ stack_to_list <- function(s) {
 stackify <- function(items, density_order) {
     if (density_order) items <- dplyr::arrange(items, value / weight)
     res <- stack()
-    for (i in seq(from = 1, to = nrow(items)))
+    for (i in seq_len(nrow(items)))
         res <- push(res, as.list(items[i, , drop = FALSE]))
     res
 }

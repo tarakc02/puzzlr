@@ -119,24 +119,31 @@ Since items are already sorted in order of density, we can take items one at a t
 
 ```{r}
 greedy <- function(ks) {
-    solution_so_far <- ks
-    current_item <- next_item(ks)
-    while (!is.null(current_item) && 
-           current_item$weight <= capacity(solution_so_far)) {
-        solution_so_far <- take(solution_so_far)
-        current_item <- next_item(solution_so_far)
+    item <- next_item(ks)
+    
+    if (n_items(ks) == 1 && item$weight > capacity(ks)) return(
+        list(lower_bound = total_value(ks),
+             upper_bound = total_value(ks),
+             solution = leave(ks))
+    )
+    
+    solution <- ks
+    while (!is.null(item) && 
+           item$weight <= capacity(solution)) {
+        solution <- take(solution)
+        item <- next_item(solution)
     }
     
-    lower_bound <- total_value(solution_so_far)
+    lower_bound <- total_value(solution)
     upper_bound <- lower_bound
-    if (capacity(solution_so_far) > 0 && n_items(solution_so_far) > 1) {
-        partial_amount <- capacity(solution_so_far) / current_item$weight
-        upper_bound <- upper_bound + (partial_amount * current_item$value)
+    if (capacity(solution) > 0 && !is.null(item)) {
+        partial_amount <- capacity(solution) / item$weight
+        upper_bound <- upper_bound + (partial_amount * item$value)
     }
     
     list(lower_bound = lower_bound,
          upper_bound = upper_bound,
-         solution = solution_so_far)
+         solution = solution)
 }
 
 # the root of the search tree for ks:
@@ -264,21 +271,71 @@ approxi_bounds <- function(ks, epsilon) {
     new_items$value <- new_values
     
     new_ks <- knapsack(capacity = capacity(ks), items = new_items)
-    approximate_solution <- taken_items(dynamic(new_ks)$solution)
-    approximate_solution <- approximate_solution$id
-    take_items(ks, approximate_solution)
+    approximate_solution <- taken_items(dp2(new_ks)$solution)
+    if (nrow(approximate_solution) > 0) {
+        approximate_solution <- take_items(ks, approximate_solution$id) 
+    } else {
+        approximate_solution <- ks
+    }
+    lower_bound <- total_value(approximate_solution)
+    upper_bound <- lower_bound / (1 - epsilon)
+    list(solution = approximate_solution,
+         lower_bound = lower_bound,
+         upper_bound = min(upper_bound, greedy(ks)$upper_bound))
 }
 ```
 
 
 ```{r}
 ks <- strongly_correlated_instance(n = 25, R = 5000)
-solve_knapsack(ks, bounds = greedy, search_strategy = best_first) %>%
-    stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1)
-system.time(dp(ks))
-system.time(dynamic(ks))
-system.time(approxi_bounds(ks, epsilon = .9))
-system.time(greedy(ks))
+system.time(solve_knapsack(ks, bounds = greedy, search_strategy = best_first) %>%
+    stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1))
+system.time(solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
+                           search_strategy = best_first) %>%
+                stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1))
+
+sol <- solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
+                      search_strategy = best_first)
+
+sola <- solve_knapsack(ks, bounds = greedy, search_strategy = best_first)
+sol_ind <- stream_which(sol, function(x) n_items(x$problem) == 0)[1]
+sola_ind <- stream_which(sola, function(x) n_items(x$problem) == 0)[1]
+
+
+sol_df <- data_frame(
+    timestamp = seq_len(sol_ind),
+    lower_bound = stream_map(sol, lower_bound) %>% 
+        as.list(from = 1, to = sol_ind) %>% as.numeric,
+    upper_bound = stream_map(sol, upper_bound) %>%
+        as.list(from = 1, to = sol_ind) %>% as.numeric) %>%
+    mutate(best_seen = cummax(lower_bound))
+
+sola_df <- data_frame(
+    timestamp = seq_len(sola_ind),
+    lower_bound = stream_map(sola, lower_bound) %>% 
+        as.list(from = 1, to = sola_ind) %>% as.numeric,
+    upper_bound = stream_map(sola, upper_bound) %>%
+        as.list(from = 1, to = sola_ind) %>% as.numeric) %>%
+    mutate(best_seen = cummax(lower_bound))
+
+sol_df %>%
+    mutate(method = "approxi") %>%
+    bind_rows(sola_df %>% mutate(method = "greedy")) %>%
+    select(-lower_bound) %>%
+    gather(series, value, -timestamp, -method) %>%
+    ggplot(aes(x = timestamp, y = value)) +
+    geom_line(aes(linetype = series)) +
+    geom_hline(yintercept = total_value(sola[sola_ind]$problem),
+               colour = "red", linetype = 4) +
+    scale_y_continuous(labels = scales::comma) + facet_wrap(~method)
+
+sol_df %>%
+    mutate(method = "approxi") %>%
+    bind_rows(sola_df %>% mutate(method = "greedy")) %>%
+    mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
+    ggplot(aes(x = timestamp, y = pct_of_upper_bound, colour = method)) +
+    geom_line()
+
 ```
 
 
@@ -287,15 +344,25 @@ system.time(greedy(ks))
 
 ```{r}
 dp2 <- function(ks) {
+    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
+        return(list(lower_bound = total_value(ks), upper_bound = total_value(ks),
+                    solution = ks))
+
     items <- items(ks)
     num_items <- nrow(items)
     weight <- items$weight
+    if (min(weight) > capacity(ks))
+        return(list(lower_bound = total_value(ks), upper_bound = total_value(ks),
+                    solution = ks))
+    
     value <- items$value
     id <- items$id
     
-    max_value <- sum(value)
+    max_value <- floor(greedy(ks)$upper_bound)
     A <- matrix(nrow = num_items, ncol = max_value, data = Inf)
-    A[1, value[1]] <- weight[1]
+    seed_ind <- 1
+    while (value[seed_ind] > max_value) seed_ind <- seed_ind + 1
+    A[seed_ind, value[seed_ind]] <- weight[seed_ind]
     
     for (i in seq_len(num_items - 1)) {
         for (p in seq_len(max_value)) {
@@ -311,21 +378,21 @@ dp2 <- function(ks) {
     
     k <- max_value
     while(sum(A[, k]) <= 0) k <- k - 1
-    permak <- k
     
-    res <- stack()
-    item <- num_items
-    minwt <- A[item, k]
-    for (item in num_items:1) {
-        thiswt <- A[item, k]
-        if (thiswt != minwt) {
-            res <- push(res, id[item + 1])
-            k <- k - value[item + 1]
-            minwt <- A[item, k]
+    upper_bound <- k; lower_bound <- k
+    pick <- vector("logical", num_items)
+    
+    n <- num_items - 1
+    while (n >= 1) {
+        if (A[n, k] != A[n + 1, k]) {
+            pick[n + 1] <- TRUE
+            k <- k - value[n + 1]
         }
+        n <- n - 1
     }
-    if (A[1, k] > 0) res <- push(res, id[1])
-    list(k = permak, solution = res)
+    if (A[1, k] == weight[1]) pick[1] <- TRUE
+    list(lower_bound = lower_bound, upper_bound = upper_bound,
+         solution = take_items(ks, items$id[which(pick)]))
 }
 
 dp <- function(ks) {

@@ -3,6 +3,7 @@ knapsack <- function(capacity, items, density_order = TRUE) {
         stop("items must be a data frame")
     if (!setequal(names(items), c("id", "weight", "value")))
         stop("items must be a data frame with columns: id, weight, value")
+    items <- items[items$weight <= capacity, , drop = FALSE]
     structure(
         list(capacity = capacity,
              items = stackify(items, density_order = density_order),
