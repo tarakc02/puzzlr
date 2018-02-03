@@ -18,7 +18,7 @@ The [knapsack problem](https://en.wikipedia.org/wiki/Knapsack_problem), in its s
 ```{r}
 library(puzzlr)
 set.seed(97317)
-ks <- weakly_correlated_instance(n = 250)
+ks <- weakly_correlated_instance(n = 50)
 ks
 ```
 
@@ -35,48 +35,51 @@ By default, items in knapsack instances are ordered in decreasing order of value
 next_item(ks)
 ```
 
-Given a knapsack instance, a new instance can be created by either `take`-ing or `leave`-ing the next item, leaving a sub problem:
+Given a knapsack instance, a new instance can be created by either taking or leaving the next item, leaving a sub problem:
 
 ```{r}
-take(ks)
-leave(ks)
+take_next(ks)
+leave_next(ks)
 sub_problems(ks)
 ```
 
-In this way, one can exhaustively enumerate all subsets of items: with the original problem as a root node, create two branches based on the subproblems `take(ks)` and `leave(ks)`, and then construct each of their two subproblems, and so on until there are no more items left to consider. The optimal solution is found in one of the leaf nodes of the tree -- among those leaf nodes whose aggregate weight does not exceed `capacity(ks)`, it is the one that maximizes the total value. Given n items, there are $2^n$ leaf nodes. So how can one find the optimal solution in a reasonable amount of time?
+In this way, one can exhaustively enumerate all subsets of items: with the original problem as a root node, create two branches based on the subproblems `take_next(ks)` and `leave_next(ks)`, and then construct each of their two subproblems, and so on until there are no more items left to consider. The optimal solution is found in one of the leaf nodes of the tree -- among those leaf nodes whose aggregate weight does not exceed `capacity(ks)`, it is the one that maximizes the total value. Given n items, there are $2^n$ leaf nodes. So how can one find the optimal solution in a reasonable amount of time?
 
 ## Branch and bound
 
-[Branch and bound](https://en.wikipedia.org/wiki/Branch_and_bound) is a family of algorithms for doing the type of search described above. In the case of the knapsack problem, given a fast way to estimate upper and lower bounds on the true optimal solution, we prune the search tree as we construct it. We keep track of the best lower bound seen so far. When branching, if one of the subproblems has an upper bound that is lower than the best lower bound seen so far, prune the tree there.
+[Branch and bound](https://en.wikipedia.org/wiki/Branch_and_bound) is a family of algorithms for finding the provably optimal solution of a problem like the knapsack that can be represented in terms of branching sub-problems. In the case of the knapsack problem, given a fast way to estimate upper and lower bounds on the true optimum for a sub-problem, prune the search tree during its construction: 
 
-The lazily evaluated lists from the [lazylist](https://github.com/tarakc02/lazylist) package provide an appealing way to implement branch-and-bound, due to the ability to define data structures recursively. We'll start with the high-level implementation and fill in the details as we go. We use the `empty_stream()` to prune or terminate a search path. Multiple search paths are combined into one by using a `search_strategy` that prioritizes search nodes:
+- Keep track of the best lower bound seen so far. 
+- When branching, if one of the subproblems has an upper bound that is lower than the best lower bound seen so far, prune the tree -- there is no need to continue exploring that path.
+
+The lazily evaluated lists from the [lazylist](https://github.com/tarakc02/lazylist) package provide an appealing way to implement branch-and-bound, due to the ability to define data structures recursively. I'll start with the high-level implementation and then fill in the details. I use the `empty_stream()` to prune or terminate a search path, and combine multiple search paths into one by using a `search_strategy` that prioritizes search nodes:
 
 ```{r}
 library(lazylist)
 solution_tree <- function(root, 
-                          branch_at,
+                          branch,
                           search_strategy, 
                           best_so_far) {
-    branches <- branch_at(root)
+    branches <- branch(root)
     if (length(branches) == 0) return(empty_stream())
     
-    prune_and_grow <- function(branch) {
-        if (upper_bound(branch) < best_so_far) return(empty_stream())
-        new_best <- max(best_so_far, lower_bound(branch))
-        cons_stream(branch,
-                    solution_tree(branch,
-                                  branch_at = branch_at,
+    explore_and_prune <- function(node) {
+        if (upper_bound(node) < best_so_far) return(empty_stream())
+        new_best <- max(best_so_far, lower_bound(node))
+        cons_stream(node,
+                    solution_tree(node,
+                                  branch = branch,
                                   search_strategy = search_strategy,
                                   best_so_far = new_best))
     }
-    branches <- purrr::map(branches, prune_and_grow)
+    branches <- purrr::map(branches, explore_and_prune)
     purrr::reduce(branches, search_strategy)
 }
 ```
 
 ## Search strategy
 
-A search strategy should be a function that takes two lazy-lists (or "streams") and combines them into one. Since it's being applied repeatedly every time we branch, we can visualize its effect as braiding or interleaving all of the branches together. The result is a single stream of search nodes, with ordering dependent on the search strategy. We can implement various tree searching strategies in this way -- breadth-first, depth-first, etc. As a first example, we implement best-first search, in which, at each stage of the search, we consider the "best" node, defined as the node with the highest `upper_bound`. Again, the ability to define things recursively helps -- here we compare the head elements of each stream, and return the stream consisting of the better of the two, along with the `best_first` of all remaining elements in the two streams:
+A search strategy should be a function that takes two lazy-lists (or "streams") and combines them into one. Since it's being applied repeatedly at every branch, I like to visualize its effect as braiding or interleaving all of the branches together. The result is a single stream of search nodes, with ordering dependent on the search strategy. There are multiple search strategies I might implement this way: breadth-first, depth-first, etc. As a first example, I'll implement best-first search, in which, at each stage of the search, the "best" node is considered, with "best" defined as the node with the highest `upper_bound`. Again, the ability to define things recursively helps -- `best_first` is defined as taking the better of the two head elements of two streams, along with the `best_first` of the remaining elements of both streams:
 
 ```{r}
 best_first <- function(s1, s2) {
@@ -95,7 +98,7 @@ best_first <- function(s1, s2) {
 
 ## Search nodes and branching
 
-Looking again at the `solution_tree` function, we need to create search nodes that have `upper_bound` and `lower_bound` methods. A search node is just a knapsack instance with some additional information tacked on.
+I still need a way to create search nodes that have `upper_bound` and `lower_bound` methods. I'll define a search node as a knapsack instance with some additional information tacked on.
 
 ```{r}
 search_node <- function(ks, bounds) {
@@ -110,31 +113,32 @@ lower_bound <- function(node) node$lower_bound
 
 ## Greedy: a simple bounding function
 
-We've so far been working under the assumption that we have a way to quickly estimate the upper and lower bounds of a knapsack instance. There are various trivial bounds to a problem, for instance a lower bound of 0, or an upper bound equal to the sum of values of all of items. We need two qualities from a bounding function, and they are in conflict with one another:
+I've so far been working under the assumption that there is a quick way to estimate the upper and lower bounds of a knapsack instance. There are various trivial bounds to a problem, for instance a lower bound of 0, or an upper bound equal to the sum of values of all of items. I'm looking for two qualities from a bounding function, and they are in conflict with one another:
 
-* it should be fast to calculate, since we're calculating it for every node in the search tree
-* it should give us tight bounds: for a given node, a tighter upper bound makes it more likely that we will prune it, while a tighter lower bound makes it more likely that we can prune other nodes. And the more nodes we prune, the quicker the search.
+* it should be fast to calculate, since it's calculated for every node in the search tree
+* it should give tight bounds: for a given node, a tighter upper bound makes it more likely to be pruned, while a tighter lower bound makes all other nodes more likely to be pruned. The more nodes that are pruned, the quicker the search.
 
-Since items are already sorted in order of density, we can take items one at a time until the knapsack is full, giving us a decent lower bound. To get an upper bound, we consider an easier to solve problem: what is the most value we can get if we're allowed to take fractional items? Taking items in order of density and then taking a fraction of the next item will give us a total value that is no less than the true optimum. The `greedy` function calculates both bounds:
+Since items are already sorted in order of density, I can take items one at a time until the knapsack is full, giving a decent lower bound. To get an upper bound, I consider an easier to solve problem: what is the most value possible if I'm allowed to take fractional items? Taking items in order of density and then taking a fraction of the next item will result in a total value that is no less than the true optimum. The `greedy` function calculates both bounds:
 
 ```{r}
 greedy <- function(ks) {
     item <- next_item(ks)
     
+    # if the only remaining item doesn't fit
     if (n_items(ks) == 1 && item$weight > capacity(ks)) return(
         list(lower_bound = total_value(ks),
              upper_bound = total_value(ks),
-             solution = leave(ks))
+             solution = leave_next(ks))
     )
     
     solution <- ks
     while (!is.null(item) && 
            item$weight <= capacity(solution)) {
-        solution <- take(solution)
+        solution <- take_next(solution)
         item <- next_item(solution)
     }
-    
     lower_bound <- total_value(solution)
+    
     upper_bound <- lower_bound
     if (capacity(solution) > 0 && !is.null(item)) {
         partial_amount <- capacity(solution) / item$weight
@@ -152,28 +156,29 @@ search_node(ks, bounds = greedy)
 
 ## Generating the solution
 
-We now have all of the necessary components of a knapsack solver:
+I now have all of the necessary components of a knapsack solver:
 
 ```{r}
 solve_knapsack <- function(ks, bounds, search_strategy) {
     root <- search_node(ks, bounds = bounds)
-    branch_fn <- function(node) {
+    # branch function takes a search node and returns its children
+    branch <- function(node) {
         subprobs <- sub_problems(node$problem)
         purrr::map(subprobs, search_node, bounds = bounds)
     }
     
     cons_stream(root, 
-                solution_tree(root, branch_at = branch_fn,
+                solution_tree(root, 
+                              branch = branch,
                               search_strategy = search_strategy,
                               best_so_far = root$lower_bound))
 }
 
 solution <- solve_knapsack(ks, bounds = greedy, search_strategy = best_first)
-solution[1]
-solution[10]
+solution[50]
 ```
 
-Recall that the leaf nodes collectively hold all possible solutions. Since we're using best first search, the first leaf-node that is processed must be the optimal solution. If there were a better solution than the first leaf node, it would have to have a better upper bound, which means we would have processed it before, which would make our leaf node not the first leaf node. 
+Recall that the leaf nodes collectively hold all possible solutions. Since I'm using best first search, the first leaf-node that is processed must be the optimal solution. If there were a better solution than the first leaf node, it would have to have a better upper bound, so it would have been processed earlier.
 
 A leaf node is one where the subproblem has no remaining items to consider.
 
@@ -212,31 +217,67 @@ solution_df %>%
 
 solution_df %>%
     mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
+    #filter(best_seen >= max(best_seen)) %>% arrange(timestamp)
     ggplot(aes(x = timestamp, y = pct_of_upper_bound)) +
     geom_line()
 ```
 
 ## Detour: an exact solution
 
+In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions that you'll see. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. Imagine we had access to a function `mkw` that, for a given value of `n` and `v`, would return the minimum knapsack weight that would give a value of exactly `v` using only items 1 through `n`. Then we'd need to find the maximum value of `v` for which the function returned an amount less than or equal to the capacity of the knapsack.
+
+How would `mkw` work? Well, we can think of it recursively. Let's assume for a moment that we already know the result of `mkw` for all inputs less than `n` and `v`. Then there are a couple of possibilities: we include the nth item, or we don't. If we don't, then `mkw(n, v)` will have the same result as `mkw(n - 1, v)`. If we do, then 
+
 ```{r}
-dynamic <- function(ks) {
+exact_solution <- function(ks) {
+    num_items <- n_items(ks); items <- items(ks)
+    capacity <- capacity(ks); weight <- items$weight; value <- items$value
+    
+    mkw <- function(n, v) {
+        if (n == 0 || v == 0) return(Inf)
+        
+        if (value[n] > v) {
+            mkw(n - 1, v)
+        } else {
+            min(mkw(n - 1, v),
+                weight[n] + opt(n - 1, v - value[n]))
+        }
+    }
+}
+```
+
+
+
+
+We start by re-framing the problem: what if, instead of the capacity of the knapsack, we were given the total value of the optimal solution, and we want to find the minimal weight necessary to achieve that 
+
+```{r}
+
+exact_solution <- function(ks) {
+    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
+        return(list(lower_bound = total_value(ks), 
+                    upper_bound = total_value(ks),
+                    solution = ks))
     num_items <- n_items(ks); items <- items(ks)
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
     
     max_value <- floor(greedy(ks)$upper_bound)
     
-    cache <- matrix(nrow = num_items, ncol = max_value, data = Inf)
+    cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
     cache[1, value[1]] <- weight[1]
+    opt_counter <- 0L
     
     opt <- function(n, v) {
+        opt_counter <<- opt_counter + 1L
         if (n == 0 || v == 0) return(Inf)
-        if (cache[n, v] < Inf) return(cache[n, v])
+        if (!is.na(cache[n, v])) return(cache[n, v])
         
         if (value[n] > v) {
-            res <- opt(n - 1, v)
+            res <- min(opt(n - 1, v), Inf, na.rm = TRUE)
         } else {
             res <- min(opt(n - 1, v),
-                       weight[n] + opt(n - 1, v - value[n]))
+                       weight[n] + opt(n - 1, v - value[n]),
+                       Inf, na.rm = TRUE)
         }
         cache[n, v] <<- res
         res
@@ -255,10 +296,16 @@ dynamic <- function(ks) {
     }
     if (opt(1, k) == weight[1]) pick[1] <- TRUE
     list(lower_bound = lower_bound, upper_bound = upper_bound,
-         solution = take_items(ks, items$id[which(pick)]))
+         solution = take_items(ks, items$id[which(pick)]),
+         iter = opt_counter,
+         cells = prod(dim(cache)),
+         cells_pct = sum(!is.na(cache)) / prod(dim(cache)))
 }
 
 ```
+
+
+
 
 
 ```{r}
@@ -271,7 +318,7 @@ approxi_bounds <- function(ks, epsilon) {
     new_items$value <- new_values
     
     new_ks <- knapsack(capacity = capacity(ks), items = new_items)
-    approximate_solution <- taken_items(dp2(new_ks)$solution)
+    approximate_solution <- taken_items(exact_solution(new_ks)$solution)
     if (nrow(approximate_solution) > 0) {
         approximate_solution <- take_items(ks, approximate_solution$id) 
     } else {
@@ -341,6 +388,61 @@ sol_df %>%
 
 
 ## Tight bounds
+
+```{r}
+dp2 <- function(ks) {
+    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
+        return(list(lower_bound = total_value(ks), 
+                    upper_bound = total_value(ks),
+                    solution = ks))
+
+    items <- items(ks); num_items <- nrow(items)
+    weight <- items$weight; value <- items$value; id <- items$id
+    
+    max_value <- floor(greedy(ks)$upper_bound)
+    required_capacity <- matrix(nrow = num_items, ncol = max_value, data = Inf)
+    
+    # With one item, I can achieve just one value
+    required_capacity[1, value[1]] <- weight[1]
+
+    for (item in seq_len(num_items - 1)) {
+        for (val in seq_len(max_value)) {
+            if (value[item + 1] < val) {
+                required_capacity[item + 1, val] <- min(
+                    required_capacity[item, val],
+                    weight[item + 1] + 
+                        required_capacity[item, val - value[item + 1]])
+            } else {
+                required_capacity[item + 1, val] <- required_capacity[item, val]
+            }
+        }
+    }
+
+    optimum <- max_value
+    while(required_capacity[num_items, optimum] > capacity(ks)) 
+        optimum <- optimum - 1
+
+    # traceback for solution    
+    solution <- ks
+    pick <- vector("logical", num_items)
+    n <- num_items - 1
+    v <- optimum
+    while (n >= 1) {
+        if (required_capacity[n, v] != required_capacity[n + 1, v]) {
+            pick[n + 1] <- TRUE
+            v <- v - value[n + 1]
+        }
+        n <- n - 1
+    }
+    if (required_capacity[1, v] == weight[1]) pick[1] <- TRUE
+    list(lower_bound = optimum, 
+         upper_bound = optimum,
+         solution = take_items(ks, items$id[which(pick)]))
+}
+
+```
+
+
 
 ```{r}
 dp2 <- function(ks) {
