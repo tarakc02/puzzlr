@@ -1,9 +1,10 @@
-knapsack <- function(capacity, items, density_order = TRUE) {
+knapsack <- function(capacity, items, density_order = TRUE,
+                     drop_heavy_items = TRUE) {
     if (!inherits(items, "data.frame"))
         stop("items must be a data frame")
     if (!setequal(names(items), c("id", "weight", "value")))
         stop("items must be a data frame with columns: id, weight, value")
-    items <- items[items$weight <= capacity, , drop = FALSE]
+    if (drop_heavy_items) items <- items[items$weight <= capacity, , drop = FALSE]
     structure(
         list(capacity = capacity,
              items = stackify(items, density_order = density_order),
@@ -28,10 +29,10 @@ n_items.knapsack <- function(ks) ks$items("size")
 total_value <- function(ks) UseMethod("total_value")
 total_value.knapsack <- function(ks) ks$value
 
-take <- function(ks) UseMethod("take")
-leave <- function(ks) UseMethod("leave")
-take.knapsack <- function(ks) next_knapsack(ks, take = TRUE)
-leave.knapsack <- function(ks) next_knapsack(ks, take = FALSE)
+take_next <- function(ks) UseMethod("take_next")
+leave_next <- function(ks) UseMethod("leave_next")
+take_next.knapsack <- function(ks) next_knapsack(ks, take = TRUE)
+leave_next.knapsack <- function(ks) next_knapsack(ks, take = FALSE)
 
 taken_items <- function(ks) UseMethod("taken_items")
 taken_items.knapsack <- function(ks) {
@@ -43,7 +44,7 @@ taken_items.knapsack <- function(ks) {
 take_items <- function(ks, ids) UseMethod("take_items")
 take_items.knapsack <- function(ks, ids) {
     while(ks$items("size") > 0)
-        ks <- if (next_item(ks)$id %in% ids) take(ks) else leave(ks)
+        ks <- if (next_item(ks)$id %in% ids) take_next(ks) else leave_next(ks)
     ks
 }
 
