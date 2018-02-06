@@ -1,3 +1,4 @@
+#' @export
 knapsack <- function(capacity, items, density_order = TRUE,
                      drop_heavy_items = TRUE) {
     if (!inherits(items, "data.frame"))
@@ -14,40 +15,59 @@ knapsack <- function(capacity, items, density_order = TRUE,
     )
 }
 
+#' @export
 capacity <- function(ks) UseMethod("capacity")
+#' @export
 capacity.knapsack <- function(ks) ks$capacity
 
+#' @export
 items <- function(ks) UseMethod("items")
+#' @export
 items.knapsack <- function(ks) item_df(ks)
 
+#' @export
 next_item <- function(ks) UseMethod("next_item")
+#' @export
 next_item.knapsack <- function(ks) ks$items("top")
 
+#' @export
 n_items <- function(ks) UseMethod("n_items")
+#' @export
 n_items.knapsack <- function(ks) ks$items("size")
 
+#' @export
 total_value <- function(ks) UseMethod("total_value")
+#' @export
 total_value.knapsack <- function(ks) ks$value
 
+#' @export
 take_next <- function(ks) UseMethod("take_next")
+#' @export
 leave_next <- function(ks) UseMethod("leave_next")
+#' @export
 take_next.knapsack <- function(ks) next_knapsack(ks, take = TRUE)
+#' @export
 leave_next.knapsack <- function(ks) next_knapsack(ks, take = FALSE)
 
+#' @export
 taken_items <- function(ks) UseMethod("taken_items")
+#' @export
 taken_items.knapsack <- function(ks) {
     lst <- stack_to_list(ks$taken)
     lst <- purrr::map(lst, tibble::as_data_frame)
     dplyr::bind_rows(lst)
 }
 
+#' @export
 take_items <- function(ks, ids) UseMethod("take_items")
+#' @export
 take_items.knapsack <- function(ks, ids) {
     while(ks$items("size") > 0)
         ks <- if (next_item(ks)$id %in% ids) take_next(ks) else leave_next(ks)
     ks
 }
 
+#' @export
 print.knapsack <- function(x, ...) {
     its <- x$items
     printlen <- pmin(6L, its("size"))
@@ -88,7 +108,7 @@ next_knapsack <- function(kss, take) {
               class = "knapsack")
 }
 
-
+#' @export
 sub_problems <- function(ks) {
     remaining_items <- ks$items
     if (remaining_items("size") <= 0L) return(list())
@@ -127,6 +147,7 @@ item_df <- function(ks) {
 # random knapsack stuff from:
 # https://pdfs.semanticscholar.org/ebd4/646ce0bd4185ea67b5f3dd265686284adb3a.pdf
 
+#' @export
 uncorrelated_instance <- function(n = 10, R = 1000) {
     weight <- sample(R, size = n, replace = TRUE)
     capacity <- round(runif(1) * sum(weight))
@@ -139,6 +160,7 @@ uncorrelated_instance <- function(n = 10, R = 1000) {
              ))
 }
 
+#' @export
 weakly_correlated_instance <- function(n = 10, R = 1000) {
     weight <- sample(R, size = n, replace = TRUE)
     capacity <- round(runif(1) * sum(weight))
@@ -157,6 +179,7 @@ weakly_correlated_instance <- function(n = 10, R = 1000) {
              ))
 }
 
+#' @export
 strongly_correlated_instance <- function(n = 10, R = 1000) {
     weight <- sample(R, size = n, replace = TRUE)
     capacity <- round(runif(1) * sum(weight))
@@ -169,6 +192,7 @@ strongly_correlated_instance <- function(n = 10, R = 1000) {
              ))
 }
 
+#' @export
 inverse_strongly_correlated_instance <- function(n = 10, R = 1000) {
     value <- sample(R, size = n, replace = TRUE)
     weight <- value + (R / 10)
@@ -182,7 +206,7 @@ inverse_strongly_correlated_instance <- function(n = 10, R = 1000) {
              ))
 }
 
-
+#' @export
 almost_strongly_correlated_instance <- function(n = 10, R = 1000) {
     weight <- sample(R, size = n, replace = TRUE)
     capacity <- round(runif(1) * sum(weight))
@@ -202,6 +226,7 @@ almost_strongly_correlated_instance <- function(n = 10, R = 1000) {
              ))
 }
 
+#' @export
 subset_sum_instance <- function(n = 10, R = 1000) {
     weight <- sample(R, size = n, replace = TRUE)
     value <- weight
@@ -216,6 +241,7 @@ subset_sum_instance <- function(n = 10, R = 1000) {
 
 }
 
+#' @export
 uncorrelated_instance_w_sim_wts <- function(n = 10, R = 1000) {
     weight_offset <- sample(101, size = n, replace = TRUE)
     weight <- 100000 + weight_offset - 1
