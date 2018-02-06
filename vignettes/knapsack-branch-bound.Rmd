@@ -217,39 +217,117 @@ solution_df %>%
 
 solution_df %>%
     mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
-    #filter(best_seen >= max(best_seen)) %>% arrange(timestamp)
     ggplot(aes(x = timestamp, y = pct_of_upper_bound)) +
     geom_line()
 ```
 
 ## Detour: an exact solution
 
-In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions that you'll see. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. Imagine we had access to a function `mkw` that, for a given value of `n` and `v`, would return the minimum knapsack weight that would give a value of exactly `v` using only items 1 through `n`. Then we'd need to find the maximum value of `v` for which the function returned an amount less than or equal to the capacity of the knapsack.
+In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions to the knapsack. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. First, we re-frame the question: for a given value `v`, what weight is required in order to have items whose values add up to exactly `v` (if there are multiple ways to get to `v`, then give the minimum weight necessary)? We'll create a function `min_wt(n, v)` to answer that question.
 
-How would `mkw` work? Well, we can think of it recursively. Let's assume for a moment that we already know the result of `mkw` for all inputs less than `n` and `v`. Then there are a couple of possibilities: we include the nth item, or we don't. If we don't, then `mkw(n, v)` will have the same result as `mkw(n - 1, v)`. If we do, then 
+I can work out a recursive solution. Assume we know the value of `min_wt` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `min_wt(n, v)` either includes the nth item, in which case:
+
+```{r, eval = FALSE}
+min_wt(n, v) == weight_nth_item + min_wt(n - 1, v - value_nth_item)
+```
+
+Or does not include the nth item, in which case:
+
+```{r, eval = FALSE}
+min_wt(n, v) == min_wt(n - 1, v)
+```
+
+Whether to include or exclude the nth item depends on which of those two expressions evaluates to a smaller amount (because we seek the *minimum* capacity required to get to `v`). Putting those ideas together in a function, I get:
+
+```{r, eval = FALSE}
+exact_solution <- function(ks) {
+    num_items <- n_items(ks); items <- items(ks)
+    capacity <- capacity(ks); weight <- items$weight; value <- items$value
+    
+    min_wt <- function(n, v) {
+        if (n == 0 || v == 0) return(Inf)
+        
+        if (value[n] > v) {
+            min_wt(n - 1, v)
+        } else {
+            min(min_wt(n - 1, v),
+                weight[n] + min_wt(n - 1, v - value[n]))
+        }
+    }
+}
+```
+
+Note that I use `Inf` as the base case, so that the calls to `min` will eventually result in a decision to take an item. 
+
+But what does any of this have to do with solving the knapsack? Well, if I know some maximum value that is achievable in this instance of the knapsack (an upper bound, that is), then I can try `min_wt(n_items(ks), k)` for decreasing values of `k` until I find one whose result is less than or equal to `capacity(ks)`, thus discovering the optimal value for the knapsack:
+
+```{r, eval = FALSE}
+k <- max_possible_value(ks)
+while (min_wt(n_items(ks), k) > capacity(ks)) k <- k - 1
+```
+
+My overall function now looks like:
 
 ```{r}
 exact_solution <- function(ks) {
     num_items <- n_items(ks); items <- items(ks)
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
     
-    mkw <- function(n, v) {
+    min_wt <- function(n, v) {
         if (n == 0 || v == 0) return(Inf)
         
         if (value[n] > v) {
-            mkw(n - 1, v)
+            min_wt(n - 1, v)
         } else {
-            min(mkw(n - 1, v),
-                weight[n] + opt(n - 1, v - value[n]))
+            min(min_wt(n - 1, v),
+                weight[n] + min_wt(n - 1, v - value[n]))
         }
     }
+    
+    k <- greedy(ks)$upper_bound
+    while (min_wt(num_items, k) > capacity) k <- k - 1
+    k
 }
+
 ```
 
+There's still a problem: I'm re-calculating `min_wt` over and over for the same inputs. Much like calculating the Fibonacci sequence...
 
+```{r}
+exact_solution <- function(ks) {
+    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
+        return(list(lower_bound = total_value(ks), 
+                    upper_bound = total_value(ks),
+                    solution = ks))
+    num_items <- n_items(ks); items <- items(ks)
+    capacity <- capacity(ks); weight <- items$weight; value <- items$value
+    
+    max_value <- floor(greedy(ks)$upper_bound)
+    
+    cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
+    cache[1, value[1]] <- weight[1]
+    
+    opt <- function(n, v) {
+        if (n == 0 || v == 0) return(Inf)
+        if (!is.na(cache[n, v])) return(cache[n, v])
+        
+        if (value[n] > v) {
+            res <- min(opt(n - 1, v), Inf, na.rm = TRUE)
+        } else {
+            res <- min(opt(n - 1, v),
+                       weight[n] + opt(n - 1, v - value[n]),
+                       Inf, na.rm = TRUE)
+        }
+        cache[n, v] <<- res
+        res
+    }
+    
+    k <- max_value
+    while (opt(num_items, k) > capacity) k <- k - 1
+    k
+}
 
-
-We start by re-framing the problem: what if, instead of the capacity of the knapsack, we were given the total value of the optimal solution, and we want to find the minimal weight necessary to achieve that 
+```
 
 ```{r}
 
@@ -265,10 +343,8 @@ exact_solution <- function(ks) {
     
     cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
     cache[1, value[1]] <- weight[1]
-    opt_counter <- 0L
     
     opt <- function(n, v) {
-        opt_counter <<- opt_counter + 1L
         if (n == 0 || v == 0) return(Inf)
         if (!is.na(cache[n, v])) return(cache[n, v])
         
@@ -296,10 +372,7 @@ exact_solution <- function(ks) {
     }
     if (opt(1, k) == weight[1]) pick[1] <- TRUE
     list(lower_bound = lower_bound, upper_bound = upper_bound,
-         solution = take_items(ks, items$id[which(pick)]),
-         iter = opt_counter,
-         cells = prod(dim(cache)),
-         cells_pct = sum(!is.na(cache)) / prod(dim(cache)))
+         solution = take_items(ks, items$id[which(pick)]))
 }
 
 ```
@@ -334,12 +407,12 @@ approxi_bounds <- function(ks, epsilon) {
 
 
 ```{r}
-ks <- strongly_correlated_instance(n = 25, R = 5000)
-system.time(solve_knapsack(ks, bounds = greedy, search_strategy = best_first) %>%
-    stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1))
-system.time(solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
-                           search_strategy = best_first) %>%
-                stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1))
+ks <- strongly_correlated_instance(n = 20, R = 5000)
+# solve_knapsack(ks, bounds = greedy, search_strategy = best_first) %>%
+#     stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1)
+# solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
+#                            search_strategy = best_first) %>%
+#                 stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1)
 
 sol <- solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
                       search_strategy = best_first)
