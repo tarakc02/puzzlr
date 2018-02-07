@@ -225,10 +225,10 @@ solution_df %>%
 
 In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions to the knapsack. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. First, we re-frame the question: for a given value `v`, what weight is required in order to have items whose values add up to exactly `v` (if there are multiple ways to get to `v`, then give the minimum weight necessary)? We'll create a function `min_wt(n, v)` to answer that question.
 
-I can work out a recursive solution. Assume we know the value of `min_wt` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `min_wt(n, v)` either includes the nth item, in which case:
+I can work out a recursive solution. Assume we know the value of `min_wt` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `min_wt(n, v)` either includes the nth item, in which case (here `value[n]` is the value of the nth item, and `weight[n]` is its weight):
 
 ```{r, eval = FALSE}
-min_wt(n, v) == weight_nth_item + min_wt(n - 1, v - value_nth_item)
+min_wt(n, v) == weight[n] + min_wt(n - 1, v - value[n])
 ```
 
 Or does not include the nth item, in which case:
@@ -245,7 +245,8 @@ exact_solution <- function(ks) {
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
     
     min_wt <- function(n, v) {
-        if (n == 0 || v == 0) return(Inf)
+        if (v == 0) return(0)
+        if (n == 0) return(Inf)
         
         if (value[n] > v) {
             min_wt(n - 1, v)
@@ -257,24 +258,24 @@ exact_solution <- function(ks) {
 }
 ```
 
-Note that I use `Inf` as the base case, so that the calls to `min` will eventually result in a decision to take an item. 
-
-But what does any of this have to do with solving the knapsack? Well, if I know some maximum value that is achievable in this instance of the knapsack (an upper bound, that is), then I can try `min_wt(n_items(ks), k)` for decreasing values of `k` until I find one whose result is less than or equal to `capacity(ks)`, thus discovering the optimal value for the knapsack:
+But what does any of this have to do with solving the knapsack? Well, if I know some maximum value that is achievable in this instance of the knapsack (an upper bound, that is), then I can try `min_wt(n_items(ks), k)` for decreasing values of `k` until I find one whose result is less than or equal to `capacity(ks)`, thus discovering the optimal value for the knapsack (here `num_items` is the number of items in the instance, and `capacity` is its capacity):
 
 ```{r, eval = FALSE}
-k <- max_possible_value(ks)
-while (min_wt(n_items(ks), k) > capacity(ks)) k <- k - 1
+k <- max_value(ks)
+while (min_wt(num_items, k) > capacity) k <- k - 1
 ```
 
-My overall function now looks like:
+I can use `greedy` to find an upper bound (the `max_value`). My overall function now looks like:
 
 ```{r}
 exact_solution <- function(ks) {
     num_items <- n_items(ks); items <- items(ks)
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
+    max_value <- greedy(ks)$upper_bound
     
     min_wt <- function(n, v) {
-        if (n == 0 || v == 0) return(Inf)
+        if (v == 0) return(0)
+        if (n == 0) return(Inf)
         
         if (value[n] > v) {
             min_wt(n - 1, v)
@@ -284,46 +285,40 @@ exact_solution <- function(ks) {
         }
     }
     
-    k <- greedy(ks)$upper_bound
+    k <- max_value
     while (min_wt(num_items, k) > capacity) k <- k - 1
     k
 }
 
 ```
 
-There's still a problem: I'm re-calculating `min_wt` over and over for the same inputs. Much like calculating the Fibonacci sequence...
+There's still a problem: I'm re-calculating `min_wt` over and over for the same inputs. To get the value of `min_wt(n, v)` I need to calculate `min_wt(n - 1, v)` as well as `min_wt(n - 1, v - .)` and so on for each of those. This is an instance where caching, or memoization, can make a big difference. Since `min_wt` has two integer arguments and an integer output, I can use a matrix to store already-calculated values -- looking up a single value in a matrix can be done very quickly:
 
 ```{r}
 exact_solution <- function(ks) {
-    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
-        return(list(lower_bound = total_value(ks), 
-                    upper_bound = total_value(ks),
-                    solution = ks))
     num_items <- n_items(ks); items <- items(ks)
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
-    
     max_value <- floor(greedy(ks)$upper_bound)
     
     cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
-    cache[1, value[1]] <- weight[1]
     
-    opt <- function(n, v) {
-        if (n == 0 || v == 0) return(Inf)
+    min_wt <- function(n, v) {
+        if (v == 0) return(0)
+        if (n == 0) return(Inf)
         if (!is.na(cache[n, v])) return(cache[n, v])
         
         if (value[n] > v) {
-            res <- min(opt(n - 1, v), Inf, na.rm = TRUE)
+            res <- min_wt(n - 1, v)
         } else {
-            res <- min(opt(n - 1, v),
-                       weight[n] + opt(n - 1, v - value[n]),
-                       Inf, na.rm = TRUE)
+            res <- min(min_wt(n - 1, v),
+                       weight[n] + min_wt(n - 1, v - value[n]))
         }
         cache[n, v] <<- res
         res
     }
     
     k <- max_value
-    while (opt(num_items, k) > capacity) k <- k - 1
+    while (min_wt(num_items, k) > capacity) k <- k - 1
     k
 }
 
