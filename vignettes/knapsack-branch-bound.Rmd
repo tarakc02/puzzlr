@@ -188,11 +188,15 @@ optimal <- stream_which(solution,
 optimal <- optimal[1]
 optimal
 solution[optimal]
+# view which items were taken
+taken_items(solution[optimal]$problem)
 ```
 
 ## Analyzing the algorithm
 
-```{r}
+The `solution` object contains the full search history, starting from the original problem at `solution[1]` to the solution on step `r format(optimal, big.mark = ",")`.
+
+```{r, message=FALSE, warning=FALSE}
 library(tidyverse)
 solution_df <- data_frame(
     timestamp = seq_len(optimal),
@@ -201,7 +205,10 @@ solution_df <- data_frame(
     upper_bound = stream_map(solution, upper_bound) %>%
         as.list(from = 1, to = optimal) %>% as.numeric) %>%
     mutate(best_seen = cummax(lower_bound))
+solution_df
 ```
+
+I can see progress towards the solution:
 
 ```{r}
 theme_set(hrbrthemes::theme_ipsum())
@@ -214,7 +221,13 @@ solution_df %>%
     geom_hline(yintercept = total_value(solution[optimal]$problem),
                colour = "red", linetype = 4) +
     scale_y_continuous(labels = scales::comma)
+```
 
+*Note that since I used best-first search, I could have stopped as soon as the `lower_bound` and `upper_bound` were equal, though that's not generally true for other search strategies.*
+
+We don't have to run `solution` until a provably optimal solution -- we can stop earlier if we like. If we did so, we'd return the `best_seen` value as the best we could do. In fact, we can use calculate the best seen percent of upper bound at each step, and so even if we stopped early, we'd be able to report a guarantee on how close the given solution is to optimal (even though we wouldn't know the true optimal solution). For instance, by time 58, we know that our best solution is at least `r scales::percent(solution_df$best_seen[58]/solution_df$upper_bound[58])` of the true optimum. 
+
+```{r}
 solution_df %>%
     mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
     ggplot(aes(x = timestamp, y = pct_of_upper_bound)) +
@@ -225,7 +238,7 @@ solution_df %>%
 
 In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions to the knapsack. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. First, we re-frame the question: for a given value `v`, what weight is required in order to have items whose values add up to exactly `v` (if there are multiple ways to get to `v`, then give the minimum weight necessary)? We'll create a function `min_wt(n, v)` to answer that question.
 
-I can work out a recursive solution. Assume we know the value of `min_wt` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `min_wt(n, v)` either includes the nth item, in which case (here `value[n]` is the value of the nth item, and `weight[n]` is its weight):
+I can work out a recursive solution. Assume we know the value of `min_wt` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `min_wt(n, v)` either includes the nth item, in which case I add the weight of the nth item to the solution of the resulting subproblem (here `value[n]` is the value of the nth item, and `weight[n]` is its weight):
 
 ```{r, eval = FALSE}
 min_wt(n, v) == weight[n] + min_wt(n - 1, v - value[n])
@@ -289,10 +302,9 @@ exact_solution <- function(ks) {
     while (min_wt(num_items, k) > capacity) k <- k - 1
     k
 }
-
 ```
 
-There's still a problem: I'm re-calculating `min_wt` over and over for the same inputs. To get the value of `min_wt(n, v)` I need to calculate `min_wt(n - 1, v)` as well as `min_wt(n - 1, v - .)` and so on for each of those. This is an instance where caching, or memoization, can make a big difference. Since `min_wt` has two integer arguments and an integer output, I can use a matrix to store already-calculated values -- looking up a single value in a matrix can be done very quickly:
+There's still a problem: I'm re-calculating `min_wt` over and over for the same inputs. To get the value of `min_wt(n, v)` I need to calculate `min_wt(n - 1, v)` as well as `min_wt(n - 1, v - value[n])` and so on for each of those. This is an instance where caching, or memoization, can make a big difference. Since `min_wt` has two integer arguments and an integer output, I can use a matrix to store already-calculated values -- looking up a single value in a matrix can be done very quickly:
 
 ```{r}
 exact_solution <- function(ks) {
@@ -321,66 +333,81 @@ exact_solution <- function(ks) {
     while (min_wt(num_items, k) > capacity) k <- k - 1
     k
 }
-
+exact_solution(ks)
 ```
 
-```{r}
+I can verify that that is the optimum by comparing to the solution from the previous section (yes, it is!), but how can I get see the items taken to get to that value? I can use the same logic I used in creating the `min_wt` function, but backwards: if `min_wt(n + 1, v)` is different from `min_wt(n, v)` that means I must have taken item `n + 1`:
 
+```{r}
 exact_solution <- function(ks) {
-    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
-        return(list(lower_bound = total_value(ks), 
-                    upper_bound = total_value(ks),
-                    solution = ks))
     num_items <- n_items(ks); items <- items(ks)
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
-    
     max_value <- floor(greedy(ks)$upper_bound)
     
     cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
-    cache[1, value[1]] <- weight[1]
     
-    opt <- function(n, v) {
-        if (n == 0 || v == 0) return(Inf)
+    min_wt <- function(n, v) {
+        if (v == 0) return(0)
+        if (n == 0) return(Inf)
         if (!is.na(cache[n, v])) return(cache[n, v])
         
         if (value[n] > v) {
-            res <- min(opt(n - 1, v), Inf, na.rm = TRUE)
+            res <- min_wt(n - 1, v)
         } else {
-            res <- min(opt(n - 1, v),
-                       weight[n] + opt(n - 1, v - value[n]),
-                       Inf, na.rm = TRUE)
+            res <- min(min_wt(n - 1, v),
+                       weight[n] + min_wt(n - 1, v - value[n]))
         }
         cache[n, v] <<- res
         res
     }
     
     k <- max_value
-    while (opt(num_items, k) > capacity) k <- k - 1
+    while (min_wt(num_items, k) > capacity) k <- k - 1
     upper_bound <- k; lower_bound <- k
     pick <- vector("logical", num_items)
     
-    for (n in seq(from = nrow(items) - 1, to = 1)) {
-        if (opt(n, k) != opt(n + 1, k)) {
+    for (n in seq(from = num_items - 1, to = 0)) {
+        if (min_wt(n, k) != min_wt(n + 1, k)) {
             pick[n + 1] <- TRUE
             k <- k - value[n + 1]
         }
     }
-    if (opt(1, k) == weight[1]) pick[1] <- TRUE
     list(lower_bound = lower_bound, upper_bound = upper_bound,
-         solution = take_items(ks, items$id[which(pick)]))
+         solution = take_items(ks, items$id[pick]))
 }
-
 ```
 
-
-
-
+And now I do see that I get the same solution as in the previous section:
 
 ```{r}
-approxi_bounds <- function(ks, epsilon) {
+exact_solution(ks)
+```
+
+If we have an exact solution, why bother with branching-and-bounding? The dimensions of the `cache` matrix in `exact_solution` provide a hint: `exact_solution` will require space and time proportional to the number of items times the `max_value`. `max_value`, meanwhile, just depends on the values of the items in the knapsack. We can see this clearly by comparing execution time between two knapsack instances that are essentially the same, but where one has larger values. 
+
+```{r}
+ks1 <- subset_sum_instance(n = 10)
+ks2 <- knapsack(capacity = capacity(ks1),
+                items = items(ks1) %>% mutate(value = value * 10))
+microbenchmark::microbenchmark(exact_solution(ks1), 
+                               exact_solution(ks2), 
+                               times = 10)
+```
+
+So, `exact_solution` will not scale very well. However, we can use it to build a better approximation than `greedy`.
+
+## Better approximations during branch-and-bound
+
+In the previous section we saw an algorithm that provides the exact optimal solution to the knapsack problem, but it does not scale well. In particular, it gets much slower as the items increase in value, even if nothing else about the instance changes.
+
+But what would happen if we just scaled the values down? As it turns out, that is the idea behind a [fully polynomial time approximation scheme](https://en.wikipedia.org/wiki/Polynomial-time_approximation_scheme) for the knapsack! If we scale all of the items in a clever way, it can be shown that the solution attained by running the `exact_solution` from the previous section on the scaled-down instance will be close to the true optimal solution of the unscaled instance. Specifically, we can get to within $1 - \epsilon$ where $\epsilon$ is a parameter. 
+
+```{r}
+fptas <- function(ks, epsilon) {
     items <- items(ks)
-    max_value <- max(items$value)
-    scaling_factor <- epsilon * (max_value / n_items(ks))
+    largest_value <- max(items$value)
+    scaling_factor <- epsilon * (largest_value / n_items(ks))
+    
     new_values <- floor(items$value / scaling_factor)
     new_items <- items
     new_items$value <- new_values
@@ -400,16 +427,25 @@ approxi_bounds <- function(ks, epsilon) {
 }
 ```
 
+Notice that `fptas` gives us a tighter lower bound than `greedy`:
+
+```{r}
+lower_bound(greedy(ks2)) 
+lower_bound(fptas(ks2, epsilon = .3))
+```
+
+And `fptas` is also much faster than `exact_solution`:
+
+```{r}
+microbenchmark::microbenchmark(
+    exact_solution(ks2), 
+    fptas(ks2, epsilon = .3), 
+    times = 10)
+```
 
 ```{r}
 ks <- strongly_correlated_instance(n = 20, R = 5000)
-# solve_knapsack(ks, bounds = greedy, search_strategy = best_first) %>%
-#     stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1)
-# solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
-#                            search_strategy = best_first) %>%
-#                 stream_filter(function(x) n_items(x$problem) == 0) %>% "["(1)
-
-sol <- solve_knapsack(ks, bounds = function(x) approxi_bounds(x, .3), 
+sol <- solve_knapsack(ks, bounds = function(x) ftpas(x, .3), 
                       search_strategy = best_first)
 
 sola <- solve_knapsack(ks, bounds = greedy, search_strategy = best_first)
@@ -450,168 +486,5 @@ sol_df %>%
     mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
     ggplot(aes(x = timestamp, y = pct_of_upper_bound, colour = method)) +
     geom_line()
-
-```
-
-
-
-## Tight bounds
-
-```{r}
-dp2 <- function(ks) {
-    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
-        return(list(lower_bound = total_value(ks), 
-                    upper_bound = total_value(ks),
-                    solution = ks))
-
-    items <- items(ks); num_items <- nrow(items)
-    weight <- items$weight; value <- items$value; id <- items$id
-    
-    max_value <- floor(greedy(ks)$upper_bound)
-    required_capacity <- matrix(nrow = num_items, ncol = max_value, data = Inf)
-    
-    # With one item, I can achieve just one value
-    required_capacity[1, value[1]] <- weight[1]
-
-    for (item in seq_len(num_items - 1)) {
-        for (val in seq_len(max_value)) {
-            if (value[item + 1] < val) {
-                required_capacity[item + 1, val] <- min(
-                    required_capacity[item, val],
-                    weight[item + 1] + 
-                        required_capacity[item, val - value[item + 1]])
-            } else {
-                required_capacity[item + 1, val] <- required_capacity[item, val]
-            }
-        }
-    }
-
-    optimum <- max_value
-    while(required_capacity[num_items, optimum] > capacity(ks)) 
-        optimum <- optimum - 1
-
-    # traceback for solution    
-    solution <- ks
-    pick <- vector("logical", num_items)
-    n <- num_items - 1
-    v <- optimum
-    while (n >= 1) {
-        if (required_capacity[n, v] != required_capacity[n + 1, v]) {
-            pick[n + 1] <- TRUE
-            v <- v - value[n + 1]
-        }
-        n <- n - 1
-    }
-    if (required_capacity[1, v] == weight[1]) pick[1] <- TRUE
-    list(lower_bound = optimum, 
-         upper_bound = optimum,
-         solution = take_items(ks, items$id[which(pick)]))
-}
-
-```
-
-
-
-```{r}
-dp2 <- function(ks) {
-    if (n_items(ks) <= 0 || capacity(ks) <= 0) 
-        return(list(lower_bound = total_value(ks), upper_bound = total_value(ks),
-                    solution = ks))
-
-    items <- items(ks)
-    num_items <- nrow(items)
-    weight <- items$weight
-    if (min(weight) > capacity(ks))
-        return(list(lower_bound = total_value(ks), upper_bound = total_value(ks),
-                    solution = ks))
-    
-    value <- items$value
-    id <- items$id
-    
-    max_value <- floor(greedy(ks)$upper_bound)
-    A <- matrix(nrow = num_items, ncol = max_value, data = Inf)
-    seed_ind <- 1
-    while (value[seed_ind] > max_value) seed_ind <- seed_ind + 1
-    A[seed_ind, value[seed_ind]] <- weight[seed_ind]
-    
-    for (i in seq_len(num_items - 1)) {
-        for (p in seq_len(max_value)) {
-            if (value[i + 1] < p) {
-                A[i + 1, p] <- pmin(A[i, p],
-                                    weight[i + 1] + A[i, p - value[i + 1]])
-            } else {
-                A[i + 1, p] <- A[i, p]
-            }
-        }
-    }
-    A[A > capacity(ks)] <- 0
-    
-    k <- max_value
-    while(sum(A[, k]) <= 0) k <- k - 1
-    
-    upper_bound <- k; lower_bound <- k
-    pick <- vector("logical", num_items)
-    
-    n <- num_items - 1
-    while (n >= 1) {
-        if (A[n, k] != A[n + 1, k]) {
-            pick[n + 1] <- TRUE
-            k <- k - value[n + 1]
-        }
-        n <- n - 1
-    }
-    if (A[1, k] == weight[1]) pick[1] <- TRUE
-    list(lower_bound = lower_bound, upper_bound = upper_bound,
-         solution = take_items(ks, items$id[which(pick)]))
-}
-
-dp <- function(ks) {
-    if (n_items(ks) == 0 || capacity(ks) == 0) 
-        return(list(solution = ks, upper_bound = ks$value))
-    capacity <- capacity(ks)
-    items <- items(ks)
-    n <- nrow(items)
-    weight <- items$weight
-    value <- items$value
-    id <- items$id
-
-    cache <- matrix(nrow = capacity, ncol = n, data = NA_integer_)
-
-    partial_solution <- function(cap, item) {
-        if (item == 0 || cap == 0) return(0L)
-        if (!is.na(cache[cap, item])) return(cache[cap, item])
-
-        if (weight[item] <= cap) {
-            resa <- partial_solution(cap, item - 1)
-            resb <- value[item] + partial_solution(cap - weight[item], item - 1)
-            res <- pmax(resa, resb)
-        } else {
-            res <- partial_solution(cap, item - 1)
-        }
-
-        cache[cap, item] <<- res
-        res
-    }
-
-    obj <- partial_solution(capacity, n)
-
-    # trace back
-    soln <- vector("logical", n)
-    remaining_capacity <- capacity
-
-    i <- n
-    while(i > 1) {
-        if (cache[remaining_capacity, i] == cache[remaining_capacity, i - 1]) {
-            i <- i - 1
-        } else {
-            soln[i] <- TRUE
-            remaining_capacity <- remaining_capacity - weight[i]
-            i <- i - 1
-        }
-    }
-    if (cache[remaining_capacity, 1] > 0) soln[1] <- TRUE
-    solution = take_items(ks, id[which(soln)])
-    list(solution = solution, upper_bound = solution$value)
-}
 
 ```
