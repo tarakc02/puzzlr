@@ -98,10 +98,16 @@ best_first <- function(s1, s2) {
 
 ## Search nodes and branching
 
-I still need a way to create search nodes that have `upper_bound` and `lower_bound` methods. I'll define a search node as a knapsack instance with some additional information tacked on.
+I still need a way to create search nodes that have `upper_bound` and `lower_bound` methods. I'll define a search node as a knapsack instance with some additional information tacked on. 
 
 ```{r}
 search_node <- function(ks, bounds) {
+    # if there are no items left, then we can't add any more value
+    if (n_items(ks) == 0) return(
+        list(problem = ks,
+             upper_bound = total_value(ks),
+             lower_bound = total_value(ks))
+    )
     b <- bounds(ks)
     list(problem = ks, 
          upper_bound = b$upper_bound,
@@ -236,46 +242,46 @@ solution_df %>%
 
 ## Detour: an exact solution
 
-In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions to the knapsack. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. First, we re-frame the question: for a given value `v`, what weight is required in order to have items whose values add up to exactly `v` (if there are multiple ways to get to `v`, then give the minimum weight necessary)? We'll create a function `min_wt(n, v)` to answer that question.
+In addition to branch-and-bound based solutions, there are a couple of different [dynamic programming](https://en.wikipedia.org/wiki/Dynamic_programming) based solutions to the knapsack. The one I'll explore here breaks the problem down into sub-problems in a somewhat unintuitive, but ultimately useful way. First, we re-frame the question: for a given value `v`, what is the smallest knapsack (in terms of capacity) required in order to have items whose values add up to exactly `v`? We'll create a function `mincap(n, v)` to answer that question.
 
-I can work out a recursive solution. Assume we know the value of `min_wt` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `min_wt(n, v)` either includes the nth item, in which case I add the weight of the nth item to the solution of the resulting subproblem (here `value[n]` is the value of the nth item, and `weight[n]` is its weight):
+I can work out a recursive solution. Assume we know the value of `mincap` for numbers less than `n`. Then I'm left looking at the nth item. The solution to `mincap(n, v)` either includes the nth item, in which case I add the weight of the nth item to the solution of the resulting subproblem (here `value[n]` is the value of the nth item, and `weight[n]` is its weight):
 
 ```{r, eval = FALSE}
-min_wt(n, v) == weight[n] + min_wt(n - 1, v - value[n])
+mincap(n, v) == weight[n] + mincap(n - 1, v - value[n])
 ```
 
 Or does not include the nth item, in which case:
 
 ```{r, eval = FALSE}
-min_wt(n, v) == min_wt(n - 1, v)
+mincap(n, v) == mincap(n - 1, v)
 ```
 
-Whether to include or exclude the nth item depends on which of those two expressions evaluates to a smaller amount (because we seek the *minimum* capacity required to get to `v`). Putting those ideas together in a function, I get:
+Whether to include or exclude the nth item depends on which of those two expressions evaluates to a smaller amount. Putting those ideas together in a function, I get:
 
 ```{r, eval = FALSE}
 exact_solution <- function(ks) {
     num_items <- n_items(ks); items <- items(ks)
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
     
-    min_wt <- function(n, v) {
+    mincap <- function(n, v) {
         if (v == 0) return(0)
         if (n == 0) return(Inf)
         
         if (value[n] > v) {
-            min_wt(n - 1, v)
+            mincap(n - 1, v)
         } else {
-            min(min_wt(n - 1, v),
-                weight[n] + min_wt(n - 1, v - value[n]))
+            min(mincap(n - 1, v),
+                weight[n] + mincap(n - 1, v - value[n]))
         }
     }
 }
 ```
 
-But what does any of this have to do with solving the knapsack? Well, if I know some maximum value that is achievable in this instance of the knapsack (an upper bound, that is), then I can try `min_wt(n_items(ks), k)` for decreasing values of `k` until I find one whose result is less than or equal to `capacity(ks)`, thus discovering the optimal value for the knapsack (here `num_items` is the number of items in the instance, and `capacity` is its capacity):
+But what does any of this have to do with solving the knapsack? Well, if I know some `max_value` that is achievable in this instance of the knapsack (an upper bound, that is), then I can try `mincap(n_items(ks), k)` for decreasing values of `k` until I find one whose result is less than or equal to `capacity(ks)`, thus discovering the optimal value for the knapsack (here `num_items` is the number of items in the instance, and `capacity` is its capacity):
 
 ```{r, eval = FALSE}
 k <- max_value(ks)
-while (min_wt(num_items, k) > capacity) k <- k - 1
+while (mincap(num_items, k) > capacity) k <- k - 1
 ```
 
 I can use `greedy` to find an upper bound (the `max_value`). My overall function now looks like:
@@ -286,25 +292,25 @@ exact_solution <- function(ks) {
     capacity <- capacity(ks); weight <- items$weight; value <- items$value
     max_value <- greedy(ks)$upper_bound
     
-    min_wt <- function(n, v) {
+    mincap <- function(n, v) {
         if (v == 0) return(0)
         if (n == 0) return(Inf)
         
         if (value[n] > v) {
-            min_wt(n - 1, v)
+            mincap(n - 1, v)
         } else {
-            min(min_wt(n - 1, v),
-                weight[n] + min_wt(n - 1, v - value[n]))
+            min(mincap(n - 1, v),
+                weight[n] + mincap(n - 1, v - value[n]))
         }
     }
     
     k <- max_value
-    while (min_wt(num_items, k) > capacity) k <- k - 1
+    while (mincap(num_items, k) > capacity) k <- k - 1
     k
 }
 ```
 
-There's still a problem: I'm re-calculating `min_wt` over and over for the same inputs. To get the value of `min_wt(n, v)` I need to calculate `min_wt(n - 1, v)` as well as `min_wt(n - 1, v - value[n])` and so on for each of those. This is an instance where caching, or memoization, can make a big difference. Since `min_wt` has two integer arguments and an integer output, I can use a matrix to store already-calculated values -- looking up a single value in a matrix can be done very quickly:
+There's still a problem: I'm re-calculating `mincap` over and over for the same inputs. To get the value of `mincap(n, v)` I need to calculate `mincap(n - 1, v)` as well as `mincap(n - 1, v - value[n])` and so on. This is an instance where caching, or memoization, can make a big difference. Since `mincap` has two integer arguments and an integer output, I can use a matrix to store already-calculated values -- looking up a single value in a matrix can be done very quickly:
 
 ```{r}
 exact_solution <- function(ks) {
@@ -314,29 +320,29 @@ exact_solution <- function(ks) {
     
     cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
     
-    min_wt <- function(n, v) {
+    mincap <- function(n, v) {
         if (v == 0) return(0)
         if (n == 0) return(Inf)
         if (!is.na(cache[n, v])) return(cache[n, v])
         
         if (value[n] > v) {
-            res <- min_wt(n - 1, v)
+            res <- mincap(n - 1, v)
         } else {
-            res <- min(min_wt(n - 1, v),
-                       weight[n] + min_wt(n - 1, v - value[n]))
+            res <- min(mincap(n - 1, v),
+                       weight[n] + mincap(n - 1, v - value[n]))
         }
         cache[n, v] <<- res
         res
     }
     
     k <- max_value
-    while (min_wt(num_items, k) > capacity) k <- k - 1
+    while (mincap(num_items, k) > capacity) k <- k - 1
     k
 }
 exact_solution(ks)
 ```
 
-I can verify that that is the optimum by comparing to the solution from the previous section (yes, it is!), but how can I get see the items taken to get to that value? I can use the same logic I used in creating the `min_wt` function, but backwards: if `min_wt(n + 1, v)` is different from `min_wt(n, v)` that means I must have taken item `n + 1`:
+I can verify that that is the optimum by comparing to the solution from the previous section (yes, it is!), but how can I get see the items taken to get to that value? I can trace my way through the items in reverse, knowing that the only reason that `mincap(n, v)` would not be the same as `mincap(n - 1, v)` would be because I took item `n`. I track back this way, flagging taken items until I've accounted for all of the optimal solution value. 
 
 ```{r}
 exact_solution <- function(ks) {
@@ -346,35 +352,40 @@ exact_solution <- function(ks) {
     
     cache <- matrix(nrow = num_items, ncol = max_value, data = NA_integer_)
     
-    min_wt <- function(n, v) {
+    mincap <- function(n, v) {
         if (v == 0) return(0)
         if (n == 0) return(Inf)
         if (!is.na(cache[n, v])) return(cache[n, v])
         
         if (value[n] > v) {
-            res <- min_wt(n - 1, v)
+            res <- mincap(n - 1, v)
         } else {
-            res <- min(min_wt(n - 1, v),
-                       weight[n] + min_wt(n - 1, v - value[n]))
+            res <- min(mincap(n - 1, v),
+                       weight[n] + mincap(n - 1, v - value[n]))
         }
         cache[n, v] <<- res
         res
     }
     
     k <- max_value
-    while (min_wt(num_items, k) > capacity) k <- k - 1
-    upper_bound <- k; lower_bound <- k
-    pick <- vector("logical", num_items)
+    while (mincap(num_items, k) > capacity) k <- k - 1
     
-    for (n in seq(from = num_items - 1, to = 0)) {
-        if (min_wt(n, k) != min_wt(n + 1, k)) {
-            pick[n + 1] <- TRUE
-            k <- k - value[n + 1]
+    # trace-back to find the items in the solution
+    n <- num_items; v <- k
+    selected <- vector("logical", num_items)
+    
+    while(v > 0) {
+        if (mincap(n, v) != mincap(n - 1, v)) {
+            selected[n] <- TRUE
+            v <- v - value[n]
         }
+        n <- n - 1
     }
-    list(lower_bound = lower_bound, upper_bound = upper_bound,
-         solution = take_items(ks, items$id[pick]))
+
+    list(lower_bound = k, upper_bound = k,
+         solution = take_items(ks, items$id[selected]))
 }
+
 ```
 
 And now I do see that I get the same solution as in the previous section:
@@ -389,9 +400,12 @@ If we have an exact solution, why bother with branching-and-bounding? The dimens
 ks1 <- subset_sum_instance(n = 10)
 ks2 <- knapsack(capacity = capacity(ks1),
                 items = items(ks1) %>% mutate(value = value * 10))
-microbenchmark::microbenchmark(exact_solution(ks1), 
-                               exact_solution(ks2), 
-                               times = 10)
+
+microbenchmark::microbenchmark(
+    exact_solution(ks1), 
+    exact_solution(ks2), 
+    times = 10
+)
 ```
 
 So, `exact_solution` will not scale very well. However, we can use it to build a better approximation than `greedy`.
@@ -400,7 +414,7 @@ So, `exact_solution` will not scale very well. However, we can use it to build a
 
 In the previous section we saw an algorithm that provides the exact optimal solution to the knapsack problem, but it does not scale well. In particular, it gets much slower as the items increase in value, even if nothing else about the instance changes.
 
-But what would happen if we just scaled the values down? As it turns out, that is the idea behind a [fully polynomial time approximation scheme](https://en.wikipedia.org/wiki/Polynomial-time_approximation_scheme) for the knapsack! If we scale all of the items in a clever way, it can be shown that the solution attained by running the `exact_solution` from the previous section on the scaled-down instance will be close to the true optimal solution of the unscaled instance. Specifically, we can get to within $1 - \epsilon$ where $\epsilon$ is a parameter. 
+But what would happen if we just scaled the values down? As it turns out, that is the idea behind a [fully polynomial time approximation scheme (or FPTAS)](https://en.wikipedia.org/wiki/Polynomial-time_approximation_scheme) for the knapsack! If we scale all of the items in a clever way, it can be shown that the solution attained by running the `exact_solution` from the previous section on the scaled-down instance will be close to the true optimal solution of the unscaled instance. Specifically, we can get to within $1 - \epsilon$ where $\epsilon$ is a parameter. 
 
 ```{r}
 fptas <- function(ks, epsilon) {
@@ -443,48 +457,86 @@ microbenchmark::microbenchmark(
     times = 10)
 ```
 
+## Comparisons
+
+We now have two bounding functions (`greedy` and `fptas`), and we can compare how well branch-and-bound performs when using each. The paper [Where are the hard knapsack problems?](https://dl.acm.org/citation.cfm?id=1063640) by David Pisinger describes and categorizes a number of different knapsack problem types based on their difficulty. Among them are:
+
+- weakly correlated instances: item values are linearly related to their weights, but with some noisiness. These are common in management, because "the return of an investment is generally proportional to the sum invested within some small variations."
+- strongly correlated instances: item values are a linear function of their weights (with no error/noise). These instances are challenging because, among other reasons, the greedy upper-bound is often not very tight.
+- subset sum instances: item values are equal to their weights, and the problem becomes a subset sum problem. These instances are challenging because all items have the same density (value per unit weight).
+
+The `puzzlr` package provides functions to generate these and other types of knapsack instances described in the paper. I'll generate instances of each of the three types described above, with different numbers of items:
+
 ```{r}
-ks <- strongly_correlated_instance(n = 20, R = 5000)
-sol <- solve_knapsack(ks, bounds = function(x) ftpas(x, .3), 
-                      search_strategy = best_first)
-
-sola <- solve_knapsack(ks, bounds = greedy, search_strategy = best_first)
-sol_ind <- stream_which(sol, function(x) n_items(x$problem) == 0)[1]
-sola_ind <- stream_which(sola, function(x) n_items(x$problem) == 0)[1]
-
-
-sol_df <- data_frame(
-    timestamp = seq_len(sol_ind),
-    lower_bound = stream_map(sol, lower_bound) %>% 
-        as.list(from = 1, to = sol_ind) %>% as.numeric,
-    upper_bound = stream_map(sol, upper_bound) %>%
-        as.list(from = 1, to = sol_ind) %>% as.numeric) %>%
-    mutate(best_seen = cummax(lower_bound))
-
-sola_df <- data_frame(
-    timestamp = seq_len(sola_ind),
-    lower_bound = stream_map(sola, lower_bound) %>% 
-        as.list(from = 1, to = sola_ind) %>% as.numeric,
-    upper_bound = stream_map(sola, upper_bound) %>%
-        as.list(from = 1, to = sola_ind) %>% as.numeric) %>%
-    mutate(best_seen = cummax(lower_bound))
-
-sol_df %>%
-    mutate(method = "approxi") %>%
-    bind_rows(sola_df %>% mutate(method = "greedy")) %>%
-    select(-lower_bound) %>%
-    gather(series, value, -timestamp, -method) %>%
-    ggplot(aes(x = timestamp, y = value)) +
-    geom_line(aes(linetype = series)) +
-    geom_hline(yintercept = total_value(sola[sola_ind]$problem),
-               colour = "red", linetype = 4) +
-    scale_y_continuous(labels = scales::comma) + facet_wrap(~method)
-
-sol_df %>%
-    mutate(method = "approxi") %>%
-    bind_rows(sola_df %>% mutate(method = "greedy")) %>%
-    mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
-    ggplot(aes(x = timestamp, y = pct_of_upper_bound, colour = method)) +
-    geom_line()
-
+problems <- expand.grid(
+    n = seq(15, 30, by = 5),
+    type = c("weakly_correlated_instance",
+             "strongly_correlated_instance",
+             "subset_sum_instance"),
+    stringsAsFactors = FALSE) %>% tbl_df %>%
+    mutate(arglist = map(n, ~list(n = .x)),
+           instance = map2(type, arglist, ~do.call(.x, args = .y))) %>%
+    select(-arglist)
 ```
+
+I can use `purrr` to generate solutions for each problem. I
+
+```{r}
+solutions <- problems %>%
+    mutate(fptas = map(instance, solve_knapsack,
+                       bounds = function(x) fptas(x, .3),
+                       search_strategy = best_first),
+           greedy = map(instance, solve_knapsack,
+                        bounds = greedy,
+                        search_strategy = best_first))
+solutions
+```
+
+I'll create a couple of helper functions to make the rest of the code clearer -- `find_opt` will find the index of the optimal solution, and `to_df` will extract some useful metrics from the solving process. These mirror what we did to find a solution in the first section. 
+
+```{r}
+find_opt <- function(s) 
+    as.integer(stream_which(s, 
+                            function(x) n_items(x$problem) == 0)[1])
+
+to_df <- function(s, until) {
+    data_frame(
+        timestamp = seq_len(until),
+        lower_bound = stream_map(s, lower_bound) %>% 
+            as.list(from = 1, to = until) %>% as.numeric,
+        upper_bound = stream_map(s, upper_bound) %>%
+            as.list(from = 1, to = until) %>% as.numeric) %>%
+        mutate(best_seen = cummax(lower_bound))
+}
+```
+
+I next use `find_opt` to find the index of the optimal solution. For some reason, `purrr` functions errored on the next bit of code, but the `*apply` functions worked just fine.
+
+```{r}
+solutions <- solutions %>%
+    mutate(fptas_i = vapply(fptas, find_opt, FUN.VALUE = integer(1)),
+           greedy_i = vapply(greedy, find_opt, FUN.VALUE = integer(1)))
+```
+
+Notice that the two solution strategies required the same number of iterations to get a provably optimal solution. That's because to prove optimality, I need to show that my solution is better than the upper bound of any other solution path. `fptas` improved our lower bounds, but not the upper bounds (exercise for another day: implement stronger upper bounds). However, the improved lower bounds mean we are able to achieve a much higher "percent of known upper bound" value much earlier in the process. If we only needed a solution that was provably close to optimal, without necessarily being optimal, the better lower bounds `fptas` would allow us to stop eralier. 
+
+```{r}
+solutions <- solutions %>%
+    mutate(fptas_solution = map2(fptas, fptas_i, ~to_df(.x, .y)),
+           greedy_solution = map2(greedy, greedy_i, ~to_df(.x, .y)))
+
+solutions %>% 
+    select(n, type, fptas_solution, greedy_solution) %>%
+    gather(solution_type, solution, -n, -type) %>%
+    unnest %>%
+    mutate(pct_of_upper_bound = best_seen / upper_bound) %>%
+    # 0-index and normalize the time to [0,1]
+    mutate(timestamp = timestamp - 1) %>%
+    group_by(n, type, solution_type) %>% 
+    mutate(timestamp = timestamp / max(timestamp)) %>%
+    ggplot(aes(x = timestamp, y = pct_of_upper_bound, colour = solution_type)) +
+    geom_line() +
+    facet_grid(type ~ n, scales = "free")
+```
+
+As expected, given the same number of iterations, `fptas`-bounding gives us a better non(provably)-optimal solution up until the moment both strategies are able to prove optimality.
