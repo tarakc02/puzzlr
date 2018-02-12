@@ -1,7 +1,7 @@
 Package: puzzlr
 Type: Package
 Title: Tools for Puzzle Solvers
-Version: 0.0.0.9007
+Version: 0.0.0.9008
 Author: Tarak Shah
 Maintainer: Tarak Shah <tarak_shah@berkeley.edu>
 Description: Use to experiment with puzzle solvers
