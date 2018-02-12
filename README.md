@@ -3,7 +3,7 @@
 puzzlr
 ======
 
-The `puzzlr` package implements square puzzles with numbered tiles where the goal is to get the tiles in order by sliding them. My hope is that this will come in handy for demonstrating or learning about different algorithms for solving the puzzles.
+The `puzzlr` package implements various puzzles. My hope is that this will come in handy for demonstrating or learning about different algorithms for solving the puzzles. So far, there are functions for creating and working with square tile-puzzles (see below) as well as instances of the knapsack problem (see `vignette("knapsack-branch-bound", package = "puzzlr")`, or this [lengthy writeup](https://tarakc02.github.io/branch-and-bound/))
 
 Installation
 ------------
@@ -40,10 +40,10 @@ Or generate a random puzzle:
 
 ``` r
 random_puzzle(size = 4)
-#> 07 .    . 08 . 09
-#> 13 . 14 . 02 . 05
-#> 12 . 11 . 06 . 15
-#> 03 . 01 . 04 . 10
+#> 08 . 03 . 10 . 12
+#> 14 . 15 . 01 . 11
+#> 07 . 06 . 05 . 09
+#> 04 . 02 .    . 13
 ```
 
 Puzzle Methods
